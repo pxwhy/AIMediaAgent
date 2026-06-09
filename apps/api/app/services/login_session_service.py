@@ -2,7 +2,7 @@
 实现逻辑：
 1. 创建平台登录会话并启动独立 Playwright 登录 worker。
 2. 用户确认登录后通知 worker 保存浏览器 storage_state。
-3. 根据 worker 输出创建账号并回写登录会话状态。
+3. 根据 worker 输出按平台 UID 创建或更新账号，并回写登录会话状态。
 """
 
 import json
@@ -13,9 +13,10 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.core_models import Account, LoginSession, LoginSessionStatus
+from app.models.core_models import Account, AccountStatus, LoginSession, LoginSessionStatus
 from app.schemas.core import LoginSessionCreate
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -124,17 +125,27 @@ def _complete_login_session(
         return session
 
     account_info = result.get("account", {})
-    account = Account(
-        platform=session.platform,
-        nickname=account_info.get("nickname") or f"{session.platform}账号",
-        uid=account_info.get("uid") or f"{session.platform}_{session.id[:8]}",
-        session_data={
-            "storage_state_path": session.state_path,
-            "login_session_id": session.id,
-            "login_at": result.get("login_at"),
-        },
-    )
-    db.add(account)
+    raw_uid = account_info.get("uid") or ""
+    uid = raw_uid or f"{session.platform}_{session.id[:8]}"
+    session_data = {
+        "storage_state_path": session.state_path,
+        "login_session_id": session.id,
+        "login_at": result.get("login_at"),
+    }
+    account = _find_existing_account(db, session.platform, raw_uid)
+    if account:
+        account.nickname = account_info.get("nickname") or account.nickname or f"{session.platform}账号"
+        account.uid = uid
+        account.session_data = session_data
+        account.status = AccountStatus.ACTIVE
+    else:
+        account = Account(
+            platform=session.platform,
+            nickname=account_info.get("nickname") or f"{session.platform}账号",
+            uid=uid,
+            session_data=session_data,
+        )
+        db.add(account)
     db.flush()
 
     session.account_id = account.id
@@ -143,3 +154,9 @@ def _complete_login_session(
     db.commit()
     db.refresh(session)
     return session
+
+
+def _find_existing_account(db: Session, platform: str, uid: str) -> Account | None:
+    if not platform or not uid:
+        return None
+    return db.scalar(select(Account).where(Account.platform == platform, Account.uid == uid))

@@ -1,8 +1,8 @@
 """
 实现逻辑：
 1. 使用已保存的头条号 storage_state 打开图文发布页。
-2. 自动填充标题、正文和图片，并根据参数决定是否点击发布。
-3. 将执行结果写入 result.json，供 API 更新发布任务状态。
+2. 自动填充标题、正文和图片，自动发布时复用头条号稳定发布按钮并执行二次确认点击。
+3. 通过截图、按钮日志和成功页判断发布结果，并写入 result.json 供 API 更新状态。
 """
 
 import argparse
@@ -63,7 +63,7 @@ def main() -> None:
             upload_images(page, image_paths)
             published = False
             if args.auto_publish:
-                publish_to_toutiao(page)
+                publish_to_toutiao(page, result_file.parent)
                 published = True
 
             write_result(
@@ -142,15 +142,21 @@ def upload_images(page, image_paths: list[Path]) -> None:
     page.wait_for_timeout(3000)
 
 
-def publish_to_toutiao(page) -> None:
+def publish_to_toutiao(page, run_dir: Path) -> None:
+    handle_publish_options(page)
+    take_screenshot(page, run_dir / "before_publish_click.png")
     page.wait_for_timeout(2000)
     click_publish_button(page)
     page.wait_for_timeout(2500)
+    take_screenshot(page, run_dir / "after_first_publish_click.png")
     click_publish_button(page)
+    page.wait_for_timeout(2500)
+    take_screenshot(page, run_dir / "after_second_publish_click.png")
     wait_publish_result(page)
 
 
 def click_publish_button(page) -> None:
+    print_publish_button_debug(page)
     locators = [
         page.locator(".publish-btn-last").last,
         page.get_by_role("button", name="发布").last,
@@ -159,26 +165,123 @@ def click_publish_button(page) -> None:
     for locator in locators:
         try:
             locator.wait_for(state="visible", timeout=10000)
-            locator.click()
+            locator.scroll_into_view_if_needed(timeout=3000)
+            if not locator.is_enabled(timeout=2000):
+                continue
+            locator.click(timeout=8000)
             return
         except Exception:
             continue
     raise RuntimeError("未找到头条号发布按钮")
 
 
+def print_publish_button_debug(page) -> None:
+    try:
+        buttons = page.locator(".publish-btn-last")
+        count = buttons.count()
+        print(f"[toutiao] publish button candidates: {count}", flush=True)
+        for index in range(min(count, 5)):
+            button = buttons.nth(index)
+            print(
+                "[toutiao] publish button "
+                f"#{index}: visible={button.is_visible(timeout=1000)} "
+                f"enabled={button.is_enabled(timeout=1000)} "
+                f"text={button.inner_text(timeout=1000)!r} "
+                f"class={button.get_attribute('class', timeout=1000)!r}",
+                flush=True,
+            )
+    except Exception as e:
+        print(f"[toutiao] publish button debug failed: {e}", flush=True)
+
+
+def handle_publish_options(page) -> None:
+    page.wait_for_timeout(1000)
+    option_handlers = [
+        enable_ad_revenue_option,
+        enable_toutiao_first_option,
+        enable_personal_opinion_option,
+    ]
+    for handler in option_handlers:
+        try:
+            handler(page)
+        except Exception as e:
+            print(f"[toutiao] publish option handler failed: {handler.__name__}: {e}", flush=True)
+
+
+def enable_ad_revenue_option(page) -> None:
+    blocks = page.locator(".edit-input").filter(has_text="投放广告赚收益")
+    for index in range(min(blocks.count(), 3)):
+        block = blocks.nth(index)
+        text = block.inner_text(timeout=1000)
+        if "投放广告赚收益" not in text:
+            continue
+        radios = block.locator(".byte-radio-inner")
+        if radios.count() > 0:
+            radios.first.click(timeout=3000)
+            print("[toutiao] selected ad revenue option", flush=True)
+            return
+
+
+def enable_toutiao_first_option(page) -> None:
+    blocks = page.locator(".edit-input").filter(has_text="头条首发")
+    for index in range(min(blocks.count(), 3)):
+        block = blocks.nth(index)
+        block.scroll_into_view_if_needed(timeout=3000)
+        text = block.inner_text(timeout=1000)
+        if "授权平台自动维权" in text:
+            return
+        checkbox = block.locator(".byte-checkbox-wrapper").first
+        if checkbox.count() > 0:
+            checkbox.click(timeout=3000)
+            print("[toutiao] enabled toutiao first option", flush=True)
+            return
+
+
+def enable_personal_opinion_option(page) -> None:
+    blocks = page.locator(".edit-input").filter(has_text="个人观点")
+    for index in range(min(blocks.count(), 3)):
+        block = blocks.nth(index)
+        block.scroll_into_view_if_needed(timeout=3000)
+        labels = block.locator("label").filter(has_text="个人观点，仅供参考")
+        for label_index in range(min(labels.count(), 5)):
+            label = labels.nth(label_index)
+            class_name = label.get_attribute("class", timeout=1000) or ""
+            if "checked" in class_name:
+                return
+            wrapper = label.locator(".byte-checkbox-wrapper").first
+            if wrapper.count() > 0:
+                wrapper.click(timeout=3000)
+                print("[toutiao] enabled personal opinion option", flush=True)
+                return
+
+
 def wait_publish_result(page) -> None:
     success_patterns = ["发布成功", "发表成功", "发布完成", "已发布", "作品管理"]
+    failure_patterns = ["发布失败", "请填写", "请上传", "审核不通过", "操作失败"]
     deadline = time.time() + 45
     while time.time() < deadline:
         try:
             text = page.locator("body").inner_text(timeout=3000)
             if any(pattern in text for pattern in success_patterns):
                 return
+            for pattern in failure_patterns:
+                if pattern in text:
+                    raise RuntimeError(f"头条号发布失败：{pattern}")
             if page.url and "manage" in page.url:
                 return
+        except RuntimeError:
+            raise
         except Exception:
             pass
         page.wait_for_timeout(1500)
+    raise RuntimeError("等待头条号发布结果超时")
+
+
+def take_screenshot(page, path: Path) -> None:
+    try:
+        page.screenshot(path=str(path), full_page=True, timeout=5000)
+    except Exception:
+        return
 
 
 def download_images(image_urls: list[str], image_dir: Path) -> list[Path]:

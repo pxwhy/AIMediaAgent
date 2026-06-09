@@ -1,9 +1,10 @@
 /// <reference types="../node_modules/.vue-global-types/vue_3.5_0_0_0.d.ts" />
 import { computed, onMounted, reactive, ref } from 'vue';
-import { autoPublishTask, cancelPublishTask, createDraftFromRawContent, createPublishTask, deleteRawContent, deletePublishTask, importCollectorItem, confirmLoginSession, createLoginSession, loadCollectorSources, loadDashboard, markPublishTaskFailed, markPublishTaskPublished, openPublishEditor, previewCollectorItems } from './api/client';
+import { autoPublishTask, cancelPublishTask, createDraftFromRawContent, createPublishTask, deleteRawContent, deleteAccount, deletePublishTask, importCollectorItem, confirmLoginSession, createLoginSession, loadAccountWorks, loadCollectorSources, loadDashboard, loadModelConfig, loadPublishTaskDiagnostics, markPublishTaskFailed, markPublishTaskPublished, openPublishEditor, previewCollectorItems, saveModelConfig, testModel, syncAccountWorks } from './api/client';
 const navItems = [
     { key: 'dashboard', label: '仪表盘', description: '采集、Agent、审核、发布和复盘的轻量闭环。' },
     { key: 'accounts', label: '账号', description: '管理平台账号、登录态和每日发布限制。' },
+    { key: 'models', label: '模型', description: '配置 DeepSeek 或其他兼容模型，供 Agent 统一调用。' },
     { key: 'collector', label: '采集', description: '查看热点采集结果和原始内容。' },
     { key: 'drafts', label: '草稿', description: '查看 Agent 生成草稿并进行人工审核。' },
     { key: 'publisher', label: '发布', description: '管理待发布、发布中和失败任务。' },
@@ -21,6 +22,10 @@ const currentNav = computed(() => navItems.find((item) => item.key === activePag
 const loginBusy = ref(false);
 const loginPlatform = ref('toutiao');
 const loginSessionId = ref('');
+const selectedAccountIds = ref([]);
+const selectedWorkAccount = ref(null);
+const accountWorks = ref([]);
+const selectedAccountWork = ref(null);
 const collectorBusy = ref(false);
 const importingUrl = ref('');
 const collectorSources = ref([]);
@@ -29,6 +34,26 @@ const selectedRawContent = ref(null);
 const collectorSourceKey = ref('ithome');
 const collectorCategoryKey = ref('home');
 const publisherBusy = ref(false);
+const selectedDiagnostics = ref(null);
+const modelBusy = ref(false);
+const modelStatusText = ref('等待加载');
+const modelTestPrompt = ref('');
+const modelTestResult = ref('');
+const modelForm = reactive({
+    provider: 'deepseek',
+    deepseek_api_key: '',
+    deepseek_base_url: 'https://api.deepseek.com',
+    deepseek_model: 'deepseek-chat',
+    other_api_key: '',
+    other_base_url: '',
+    other_model: '',
+    temperature: 0.7,
+    timeout_seconds: 60
+});
+const modelKeyPlaceholders = reactive({
+    deepseek: '未配置',
+    other: '未配置'
+});
 const publishForm = reactive({
     raw_content_id: 0,
     account_id: 0,
@@ -39,6 +64,14 @@ const collectorCategories = computed(() => {
     const source = collectorSources.value.find((item) => item.key === collectorSourceKey.value);
     return source?.categories ?? [];
 });
+const allAccountsSelected = computed({
+    get() {
+        return dashboard.accounts.length > 0 && selectedAccountIds.value.length === dashboard.accounts.length;
+    },
+    set(checked) {
+        selectedAccountIds.value = checked ? dashboard.accounts.map((account) => account.id) : [];
+    }
+});
 async function refresh() {
     statusText.value = '加载中';
     try {
@@ -47,11 +80,74 @@ async function refresh() {
         dashboard.rawContents = data.rawContents;
         dashboard.drafts = data.drafts;
         dashboard.publishTasks = data.publishTasks;
+        const accountIds = new Set(data.accounts.map((account) => account.id));
+        selectedAccountIds.value = selectedAccountIds.value.filter((accountId) => accountIds.has(accountId));
         statusText.value = '已同步';
     }
     catch (error) {
         console.error(error);
         statusText.value = 'API 未连接';
+    }
+}
+function applyModelConfig(config) {
+    modelForm.provider = config.provider;
+    modelForm.deepseek_api_key = '';
+    modelForm.deepseek_base_url = config.deepseek_base_url;
+    modelForm.deepseek_model = config.deepseek_model;
+    modelForm.other_api_key = '';
+    modelForm.other_base_url = config.other_base_url;
+    modelForm.other_model = config.other_model;
+    modelForm.temperature = config.temperature;
+    modelForm.timeout_seconds = config.timeout_seconds;
+    modelKeyPlaceholders.deepseek = config.deepseek_api_key_configured ? '已配置，留空则不修改' : '未配置';
+    modelKeyPlaceholders.other = config.other_api_key_configured ? '已配置，留空则不修改' : '未配置';
+}
+async function loadModels() {
+    modelStatusText.value = '加载中';
+    try {
+        applyModelConfig(await loadModelConfig());
+        modelStatusText.value = '模型配置已加载';
+    }
+    catch (error) {
+        console.error(error);
+        modelStatusText.value = '模型配置加载失败';
+    }
+}
+async function saveModels() {
+    modelBusy.value = true;
+    modelStatusText.value = '正在保存模型配置';
+    try {
+        const config = await saveModelConfig({ ...modelForm });
+        applyModelConfig(config);
+        modelStatusText.value = '模型配置已保存';
+    }
+    catch (error) {
+        console.error(error);
+        modelStatusText.value = '模型配置保存失败';
+    }
+    finally {
+        modelBusy.value = false;
+    }
+}
+async function runModelTest() {
+    if (!modelTestPrompt.value.trim()) {
+        modelStatusText.value = '请输入测试提示词';
+        return;
+    }
+    modelBusy.value = true;
+    modelStatusText.value = '正在测试模型';
+    modelTestResult.value = '';
+    try {
+        const result = await testModel(modelTestPrompt.value);
+        modelTestResult.value = `${result.provider} / ${result.model}\n\n${result.content}`;
+        modelStatusText.value = '模型测试成功';
+    }
+    catch (error) {
+        console.error(error);
+        modelStatusText.value = '模型测试失败';
+    }
+    finally {
+        modelBusy.value = false;
     }
 }
 async function openLoginSession() {
@@ -82,7 +178,7 @@ async function confirmLogin() {
         if (session.status === 'completed') {
             loginSessionId.value = '';
             await refresh();
-            statusText.value = '登录态已保存，账号已添加';
+            statusText.value = '登录态已保存，账号已同步';
         }
         else {
             statusText.value = session.error_message || '登录确认失败';
@@ -95,6 +191,105 @@ async function confirmLogin() {
     finally {
         loginBusy.value = false;
     }
+}
+async function removeAccount(account) {
+    if (!window.confirm(`确认删除「${account.nickname || account.uid || account.platform}」吗？`)) {
+        return;
+    }
+    loginBusy.value = true;
+    statusText.value = '正在删除账号';
+    try {
+        await deleteAccount(account.id);
+        selectedAccountIds.value = selectedAccountIds.value.filter((accountId) => accountId !== account.id);
+        if (selectedWorkAccount.value?.id === account.id) {
+            clearAccountWorks();
+        }
+        if (publishForm.account_id === account.id) {
+            publishForm.account_id = 0;
+        }
+        await refresh();
+        statusText.value = '账号已删除';
+    }
+    catch (error) {
+        console.error(error);
+        statusText.value = '账号删除失败';
+    }
+    finally {
+        loginBusy.value = false;
+    }
+}
+async function removeSelectedAccounts() {
+    const accountIds = [...selectedAccountIds.value];
+    if (accountIds.length === 0) {
+        return;
+    }
+    if (!window.confirm(`确认删除已选中的 ${accountIds.length} 个账号吗？`)) {
+        return;
+    }
+    loginBusy.value = true;
+    statusText.value = '正在批量删除账号';
+    try {
+        await Promise.all(accountIds.map((accountId) => deleteAccount(accountId)));
+        if (accountIds.includes(publishForm.account_id)) {
+            publishForm.account_id = 0;
+        }
+        if (selectedWorkAccount.value && accountIds.includes(selectedWorkAccount.value.id)) {
+            clearAccountWorks();
+        }
+        selectedAccountIds.value = [];
+        await refresh();
+        statusText.value = `已删除 ${accountIds.length} 个账号`;
+    }
+    catch (error) {
+        console.error(error);
+        statusText.value = '批量删除账号失败';
+    }
+    finally {
+        loginBusy.value = false;
+    }
+}
+async function syncWorks(account) {
+    loginBusy.value = true;
+    statusText.value = '正在同步作品';
+    try {
+        const result = await syncAccountWorks(account.id);
+        selectedWorkAccount.value = account;
+        accountWorks.value = await loadAccountWorks(account.id);
+        selectedAccountWork.value = null;
+        statusText.value = result.message || `已同步 ${result.synced_count} 条作品`;
+    }
+    catch (error) {
+        console.error(error);
+        statusText.value = '同步作品失败';
+    }
+    finally {
+        loginBusy.value = false;
+    }
+}
+async function showAccountWorks(account) {
+    loginBusy.value = true;
+    statusText.value = '正在加载作品';
+    try {
+        selectedWorkAccount.value = account;
+        accountWorks.value = await loadAccountWorks(account.id);
+        selectedAccountWork.value = null;
+        statusText.value = '作品已加载';
+    }
+    catch (error) {
+        console.error(error);
+        statusText.value = '作品加载失败';
+    }
+    finally {
+        loginBusy.value = false;
+    }
+}
+function clearAccountWorks() {
+    selectedWorkAccount.value = null;
+    accountWorks.value = [];
+    selectedAccountWork.value = null;
+}
+function selectAccountWork(work) {
+    selectedAccountWork.value = work;
 }
 async function loadCollectors() {
     try {
@@ -181,6 +376,13 @@ async function removeRawContent(content) {
 }
 function formatDate(value) {
     return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-';
+}
+function metricText(metrics, key) {
+    const value = metrics[key];
+    if (value === undefined || value === null || value === '') {
+        return '-';
+    }
+    return String(value);
 }
 function syncPublishDraftForm() {
     const rawContent = dashboard.rawContents.find((content) => content.id === publishForm.raw_content_id);
@@ -299,6 +501,24 @@ async function cancelTask(taskId) {
         statusText.value = '取消任务失败';
     }
 }
+async function showTaskDiagnostics(taskId) {
+    publisherBusy.value = true;
+    statusText.value = '正在加载任务详情';
+    try {
+        selectedDiagnostics.value = await loadPublishTaskDiagnostics(taskId);
+        statusText.value = '任务详情已加载';
+    }
+    catch (error) {
+        console.error(error);
+        statusText.value = '任务详情加载失败';
+    }
+    finally {
+        publisherBusy.value = false;
+    }
+}
+function clearDiagnostics() {
+    selectedDiagnostics.value = null;
+}
 async function removeTask(taskId) {
     if (!window.confirm('确认删除这个发布任务吗？')) {
         return;
@@ -349,11 +569,21 @@ function taskStatusClass(status) {
 function isPublishedTask(status) {
     return normalizeStatus(status) === 'published';
 }
+function canShowOpenEditor(status) {
+    return ['pending'].includes(normalizeStatus(status));
+}
+function canShowAutoPublish(task) {
+    const status = normalizeStatus(task.status);
+    return ['pending', 'failed'].includes(status) && canAutoPublish(task.platform);
+}
+function canShowPublishingActions(status) {
+    return normalizeStatus(status) === 'publishing';
+}
 function isTerminalTask(status) {
     return ['published', 'failed', 'canceled'].includes(normalizeStatus(status));
 }
 onMounted(async () => {
-    await Promise.all([refresh(), loadCollectors()]);
+    await Promise.all([refresh(), loadCollectors(), loadModels()]);
 });
 debugger; /* PartiallyEnd: #3632/scriptSetup.vue */
 const __VLS_ctx = {};
@@ -497,8 +727,27 @@ else if (__VLS_ctx.activePage === 'accounts') {
             ...{ class: "table" },
         });
         __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
-            ...{ class: "table-row table-head" },
+            ...{ class: "bulk-actions" },
         });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        (__VLS_ctx.selectedAccountIds.length);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (__VLS_ctx.removeSelectedAccounts) },
+            ...{ class: "text-button danger" },
+            disabled: (__VLS_ctx.loginBusy || __VLS_ctx.selectedAccountIds.length === 0),
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "table-row table-head account-table-row" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+            ...{ class: "checkbox-cell" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+            type: "checkbox",
+            disabled: (__VLS_ctx.loginBusy || __VLS_ctx.dashboard.accounts.length === 0),
+        });
+        (__VLS_ctx.allAccountsSelected);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
         __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -507,8 +756,17 @@ else if (__VLS_ctx.activePage === 'accounts') {
         for (const [account] of __VLS_getVForSourceType((__VLS_ctx.dashboard.accounts))) {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
                 key: (account.id),
-                ...{ class: "table-row" },
+                ...{ class: "table-row account-table-row" },
             });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({
+                ...{ class: "checkbox-cell" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+                type: "checkbox",
+                value: (account.id),
+                disabled: (__VLS_ctx.loginBusy),
+            });
+            (__VLS_ctx.selectedAccountIds);
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
             (account.platform);
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
@@ -519,6 +777,127 @@ else if (__VLS_ctx.activePage === 'accounts') {
             (account.status);
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
             (account.daily_publish_limit);
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                ...{ class: "row-actions" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                ...{ onClick: (...[$event]) => {
+                        if (!!(__VLS_ctx.activePage === 'dashboard'))
+                            return;
+                        if (!(__VLS_ctx.activePage === 'accounts'))
+                            return;
+                        if (!!(__VLS_ctx.dashboard.accounts.length === 0))
+                            return;
+                        __VLS_ctx.syncWorks(account);
+                    } },
+                ...{ class: "text-button" },
+                disabled: (__VLS_ctx.loginBusy || account.platform !== 'toutiao'),
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                ...{ onClick: (...[$event]) => {
+                        if (!!(__VLS_ctx.activePage === 'dashboard'))
+                            return;
+                        if (!(__VLS_ctx.activePage === 'accounts'))
+                            return;
+                        if (!!(__VLS_ctx.dashboard.accounts.length === 0))
+                            return;
+                        __VLS_ctx.showAccountWorks(account);
+                    } },
+                ...{ class: "text-button" },
+                disabled: (__VLS_ctx.loginBusy),
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                ...{ onClick: (...[$event]) => {
+                        if (!!(__VLS_ctx.activePage === 'dashboard'))
+                            return;
+                        if (!(__VLS_ctx.activePage === 'accounts'))
+                            return;
+                        if (!!(__VLS_ctx.dashboard.accounts.length === 0))
+                            return;
+                        __VLS_ctx.removeAccount(account);
+                    } },
+                ...{ class: "text-button danger" },
+                disabled: (__VLS_ctx.loginBusy),
+            });
+        }
+    }
+    if (__VLS_ctx.selectedWorkAccount) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+            ...{ class: "account-works-panel" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "account-works-header" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
+        (__VLS_ctx.selectedWorkAccount.nickname || __VLS_ctx.selectedWorkAccount.uid || __VLS_ctx.selectedWorkAccount.platform);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (__VLS_ctx.clearAccountWorks) },
+            ...{ class: "text-button" },
+        });
+        if (__VLS_ctx.accountWorks.length === 0) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "empty compact-empty" },
+            });
+        }
+        else {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "table" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "table-row account-work-row table-head" },
+            });
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+            for (const [work] of __VLS_getVForSourceType((__VLS_ctx.accountWorks))) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                    key: (work.id),
+                    ...{ class: "table-row account-work-row" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                if (work.url) {
+                    __VLS_asFunctionalElement(__VLS_intrinsicElements.a, __VLS_intrinsicElements.a)({
+                        href: (work.url),
+                        target: "_blank",
+                        rel: "noreferrer",
+                    });
+                    (work.title);
+                }
+                else {
+                    (work.title);
+                }
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                (work.status || '-');
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                (__VLS_ctx.metricText(work.metrics, 'views'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                (__VLS_ctx.metricText(work.metrics, 'likes'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                (__VLS_ctx.metricText(work.metrics, 'comments'));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+                (__VLS_ctx.formatDate(work.synced_at));
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    ...{ class: "row-actions" },
+                });
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (...[$event]) => {
+                            if (!!(__VLS_ctx.activePage === 'dashboard'))
+                                return;
+                            if (!(__VLS_ctx.activePage === 'accounts'))
+                                return;
+                            if (!(__VLS_ctx.selectedWorkAccount))
+                                return;
+                            if (!!(__VLS_ctx.accountWorks.length === 0))
+                                return;
+                            __VLS_ctx.selectAccountWork(work);
+                        } },
+                    ...{ class: "text-button" },
+                });
+            }
         }
     }
 }
@@ -862,6 +1241,108 @@ else if (__VLS_ctx.activePage === 'publisher') {
             __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
                 ...{ class: "row-actions task-actions" },
             });
+            if (__VLS_ctx.canShowOpenEditor(task.status)) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (...[$event]) => {
+                            if (!!(__VLS_ctx.activePage === 'dashboard'))
+                                return;
+                            if (!!(__VLS_ctx.activePage === 'accounts'))
+                                return;
+                            if (!!(__VLS_ctx.activePage === 'collector'))
+                                return;
+                            if (!(__VLS_ctx.activePage === 'publisher'))
+                                return;
+                            if (!!(__VLS_ctx.dashboard.publishTasks.length === 0))
+                                return;
+                            if (!(__VLS_ctx.canShowOpenEditor(task.status)))
+                                return;
+                            __VLS_ctx.openEditor(task);
+                        } },
+                    ...{ class: "text-button" },
+                    disabled: (__VLS_ctx.publisherBusy),
+                });
+            }
+            if (__VLS_ctx.canShowAutoPublish(task)) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (...[$event]) => {
+                            if (!!(__VLS_ctx.activePage === 'dashboard'))
+                                return;
+                            if (!!(__VLS_ctx.activePage === 'accounts'))
+                                return;
+                            if (!!(__VLS_ctx.activePage === 'collector'))
+                                return;
+                            if (!(__VLS_ctx.activePage === 'publisher'))
+                                return;
+                            if (!!(__VLS_ctx.dashboard.publishTasks.length === 0))
+                                return;
+                            if (!(__VLS_ctx.canShowAutoPublish(task)))
+                                return;
+                            __VLS_ctx.autoPublish(task);
+                        } },
+                    ...{ class: "text-button danger" },
+                    disabled: (__VLS_ctx.publisherBusy),
+                });
+            }
+            if (__VLS_ctx.canShowPublishingActions(task.status)) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (...[$event]) => {
+                            if (!!(__VLS_ctx.activePage === 'dashboard'))
+                                return;
+                            if (!!(__VLS_ctx.activePage === 'accounts'))
+                                return;
+                            if (!!(__VLS_ctx.activePage === 'collector'))
+                                return;
+                            if (!(__VLS_ctx.activePage === 'publisher'))
+                                return;
+                            if (!!(__VLS_ctx.dashboard.publishTasks.length === 0))
+                                return;
+                            if (!(__VLS_ctx.canShowPublishingActions(task.status)))
+                                return;
+                            __VLS_ctx.markPublished(task.id);
+                        } },
+                    ...{ class: "text-button" },
+                });
+            }
+            if (__VLS_ctx.canShowPublishingActions(task.status)) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (...[$event]) => {
+                            if (!!(__VLS_ctx.activePage === 'dashboard'))
+                                return;
+                            if (!!(__VLS_ctx.activePage === 'accounts'))
+                                return;
+                            if (!!(__VLS_ctx.activePage === 'collector'))
+                                return;
+                            if (!(__VLS_ctx.activePage === 'publisher'))
+                                return;
+                            if (!!(__VLS_ctx.dashboard.publishTasks.length === 0))
+                                return;
+                            if (!(__VLS_ctx.canShowPublishingActions(task.status)))
+                                return;
+                            __VLS_ctx.markFailed(task.id);
+                        } },
+                    ...{ class: "text-button" },
+                });
+            }
+            if (__VLS_ctx.canShowPublishingActions(task.status)) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+                    ...{ onClick: (...[$event]) => {
+                            if (!!(__VLS_ctx.activePage === 'dashboard'))
+                                return;
+                            if (!!(__VLS_ctx.activePage === 'accounts'))
+                                return;
+                            if (!!(__VLS_ctx.activePage === 'collector'))
+                                return;
+                            if (!(__VLS_ctx.activePage === 'publisher'))
+                                return;
+                            if (!!(__VLS_ctx.dashboard.publishTasks.length === 0))
+                                return;
+                            if (!(__VLS_ctx.canShowPublishingActions(task.status)))
+                                return;
+                            __VLS_ctx.cancelTask(task.id);
+                        } },
+                    ...{ class: "text-button" },
+                });
+            }
             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                 ...{ onClick: (...[$event]) => {
                         if (!!(__VLS_ctx.activePage === 'dashboard'))
@@ -874,78 +1355,10 @@ else if (__VLS_ctx.activePage === 'publisher') {
                             return;
                         if (!!(__VLS_ctx.dashboard.publishTasks.length === 0))
                             return;
-                        __VLS_ctx.openEditor(task);
+                        __VLS_ctx.showTaskDiagnostics(task.id);
                     } },
                 ...{ class: "text-button" },
-                disabled: (__VLS_ctx.publisherBusy || __VLS_ctx.isTerminalTask(task.status)),
-            });
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-                ...{ onClick: (...[$event]) => {
-                        if (!!(__VLS_ctx.activePage === 'dashboard'))
-                            return;
-                        if (!!(__VLS_ctx.activePage === 'accounts'))
-                            return;
-                        if (!!(__VLS_ctx.activePage === 'collector'))
-                            return;
-                        if (!(__VLS_ctx.activePage === 'publisher'))
-                            return;
-                        if (!!(__VLS_ctx.dashboard.publishTasks.length === 0))
-                            return;
-                        __VLS_ctx.autoPublish(task);
-                    } },
-                ...{ class: "text-button danger" },
-                disabled: (__VLS_ctx.publisherBusy || __VLS_ctx.isTerminalTask(task.status) || !__VLS_ctx.canAutoPublish(task.platform)),
-            });
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-                ...{ onClick: (...[$event]) => {
-                        if (!!(__VLS_ctx.activePage === 'dashboard'))
-                            return;
-                        if (!!(__VLS_ctx.activePage === 'accounts'))
-                            return;
-                        if (!!(__VLS_ctx.activePage === 'collector'))
-                            return;
-                        if (!(__VLS_ctx.activePage === 'publisher'))
-                            return;
-                        if (!!(__VLS_ctx.dashboard.publishTasks.length === 0))
-                            return;
-                        __VLS_ctx.markPublished(task.id);
-                    } },
-                ...{ class: "text-button" },
-                disabled: (__VLS_ctx.isPublishedTask(task.status)),
-            });
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-                ...{ onClick: (...[$event]) => {
-                        if (!!(__VLS_ctx.activePage === 'dashboard'))
-                            return;
-                        if (!!(__VLS_ctx.activePage === 'accounts'))
-                            return;
-                        if (!!(__VLS_ctx.activePage === 'collector'))
-                            return;
-                        if (!(__VLS_ctx.activePage === 'publisher'))
-                            return;
-                        if (!!(__VLS_ctx.dashboard.publishTasks.length === 0))
-                            return;
-                        __VLS_ctx.markFailed(task.id);
-                    } },
-                ...{ class: "text-button" },
-                disabled: (__VLS_ctx.isTerminalTask(task.status)),
-            });
-            __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
-                ...{ onClick: (...[$event]) => {
-                        if (!!(__VLS_ctx.activePage === 'dashboard'))
-                            return;
-                        if (!!(__VLS_ctx.activePage === 'accounts'))
-                            return;
-                        if (!!(__VLS_ctx.activePage === 'collector'))
-                            return;
-                        if (!(__VLS_ctx.activePage === 'publisher'))
-                            return;
-                        if (!!(__VLS_ctx.dashboard.publishTasks.length === 0))
-                            return;
-                        __VLS_ctx.cancelTask(task.id);
-                    } },
-                ...{ class: "text-button" },
-                disabled: (__VLS_ctx.isTerminalTask(task.status)),
+                disabled: (__VLS_ctx.publisherBusy),
             });
             __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
                 ...{ onClick: (...[$event]) => {
@@ -965,6 +1378,172 @@ else if (__VLS_ctx.activePage === 'publisher') {
             });
         }
     }
+    if (__VLS_ctx.selectedDiagnostics) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+            ...{ class: "diagnostics-panel" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "diagnostics-header" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
+        (__VLS_ctx.selectedDiagnostics.task_id);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+            ...{ onClick: (__VLS_ctx.clearDiagnostics) },
+            ...{ class: "text-button" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "diagnostics-grid" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+        (__VLS_ctx.taskStatusLabel(__VLS_ctx.selectedDiagnostics.status));
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+        (__VLS_ctx.selectedDiagnostics.run_dir);
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+        (__VLS_ctx.selectedDiagnostics.result?.platform_url || '-');
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.strong, __VLS_intrinsicElements.strong)({});
+        (__VLS_ctx.selectedDiagnostics.result?.error_message || '-');
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "diagnostics-block" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h4, __VLS_intrinsicElements.h4)({});
+        if (__VLS_ctx.selectedDiagnostics.screenshots.length) {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "screenshot-list" },
+            });
+            for (const [name] of __VLS_getVForSourceType((__VLS_ctx.selectedDiagnostics.screenshots))) {
+                __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({
+                    key: (name),
+                });
+                (name);
+            }
+        }
+        else {
+            __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+                ...{ class: "diagnostics-empty" },
+            });
+        }
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+            ...{ class: "diagnostics-block" },
+        });
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.h4, __VLS_intrinsicElements.h4)({});
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.pre, __VLS_intrinsicElements.pre)({});
+        (__VLS_ctx.selectedDiagnostics.logs || '暂无日志');
+    }
+}
+else if (__VLS_ctx.activePage === 'models') {
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+        ...{ class: "panel" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+        ...{ class: "panel-title" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.h2, __VLS_intrinsicElements.h2)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+    (__VLS_ctx.modelStatusText);
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+        ...{ class: "model-config-grid" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+        ...{ class: "model-config-block" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.select, __VLS_intrinsicElements.select)({
+        value: (__VLS_ctx.modelForm.provider),
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+        value: "deepseek",
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.option, __VLS_intrinsicElements.option)({
+        value: "other",
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+        type: "number",
+        min: "0",
+        max: "2",
+        step: "0.1",
+    });
+    (__VLS_ctx.modelForm.temperature);
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+        type: "number",
+        min: "5",
+        max: "300",
+    });
+    (__VLS_ctx.modelForm.timeout_seconds);
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+        ...{ class: "model-config-block" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+        type: "password",
+        placeholder: (__VLS_ctx.modelKeyPlaceholders.deepseek),
+    });
+    (__VLS_ctx.modelForm.deepseek_api_key);
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({});
+    (__VLS_ctx.modelForm.deepseek_base_url);
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({});
+    (__VLS_ctx.modelForm.deepseek_model);
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+        ...{ class: "model-config-block" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.h3, __VLS_intrinsicElements.h3)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+        type: "password",
+        placeholder: (__VLS_ctx.modelKeyPlaceholders.other),
+    });
+    (__VLS_ctx.modelForm.other_api_key);
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({
+        placeholder: "https://example.com/v1",
+    });
+    (__VLS_ctx.modelForm.other_base_url);
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.label, __VLS_intrinsicElements.label)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.span, __VLS_intrinsicElements.span)({});
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.input)({});
+    (__VLS_ctx.modelForm.other_model);
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+        ...{ class: "model-test-panel" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.textarea, __VLS_intrinsicElements.textarea)({
+        value: (__VLS_ctx.modelTestPrompt),
+        rows: "4",
+        placeholder: "输入测试提示词",
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+        ...{ class: "model-actions" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+        ...{ onClick: (__VLS_ctx.saveModels) },
+        ...{ class: "primary" },
+        disabled: (__VLS_ctx.modelBusy),
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+        ...{ onClick: (__VLS_ctx.runModelTest) },
+        ...{ class: "secondary" },
+        disabled: (__VLS_ctx.modelBusy),
+    });
+    if (__VLS_ctx.modelTestResult) {
+        __VLS_asFunctionalElement(__VLS_intrinsicElements.pre, __VLS_intrinsicElements.pre)({});
+        (__VLS_ctx.modelTestResult);
+    }
 }
 else {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
@@ -979,6 +1558,36 @@ else {
     __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
         ...{ class: "empty" },
     });
+}
+if (__VLS_ctx.selectedAccountWork) {
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+        ...{ onClick: (...[$event]) => {
+                if (!(__VLS_ctx.selectedAccountWork))
+                    return;
+                __VLS_ctx.selectedAccountWork = null;
+            } },
+        ...{ class: "modal-backdrop" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.section, __VLS_intrinsicElements.section)({
+        ...{ class: "work-content-modal" },
+        role: "dialog",
+        'aria-modal': "true",
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.div, __VLS_intrinsicElements.div)({
+        ...{ class: "work-content-header" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.h4, __VLS_intrinsicElements.h4)({});
+    (__VLS_ctx.selectedAccountWork.title);
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.button, __VLS_intrinsicElements.button)({
+        ...{ onClick: (...[$event]) => {
+                if (!(__VLS_ctx.selectedAccountWork))
+                    return;
+                __VLS_ctx.selectedAccountWork = null;
+            } },
+        ...{ class: "text-button" },
+    });
+    __VLS_asFunctionalElement(__VLS_intrinsicElements.pre, __VLS_intrinsicElements.pre)({});
+    (__VLS_ctx.selectedAccountWork.content || '暂无正文，下次同步会继续尝试补全。');
 }
 /** @type {__VLS_StyleScopedClasses['shell']} */ ;
 /** @type {__VLS_StyleScopedClasses['sidebar']} */ ;
@@ -1003,9 +1612,34 @@ else {
 /** @type {__VLS_StyleScopedClasses['primary']} */ ;
 /** @type {__VLS_StyleScopedClasses['empty']} */ ;
 /** @type {__VLS_StyleScopedClasses['table']} */ ;
+/** @type {__VLS_StyleScopedClasses['bulk-actions']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['danger']} */ ;
 /** @type {__VLS_StyleScopedClasses['table-row']} */ ;
 /** @type {__VLS_StyleScopedClasses['table-head']} */ ;
+/** @type {__VLS_StyleScopedClasses['account-table-row']} */ ;
+/** @type {__VLS_StyleScopedClasses['checkbox-cell']} */ ;
 /** @type {__VLS_StyleScopedClasses['table-row']} */ ;
+/** @type {__VLS_StyleScopedClasses['account-table-row']} */ ;
+/** @type {__VLS_StyleScopedClasses['checkbox-cell']} */ ;
+/** @type {__VLS_StyleScopedClasses['row-actions']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['danger']} */ ;
+/** @type {__VLS_StyleScopedClasses['account-works-panel']} */ ;
+/** @type {__VLS_StyleScopedClasses['account-works-header']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['empty']} */ ;
+/** @type {__VLS_StyleScopedClasses['compact-empty']} */ ;
+/** @type {__VLS_StyleScopedClasses['table']} */ ;
+/** @type {__VLS_StyleScopedClasses['table-row']} */ ;
+/** @type {__VLS_StyleScopedClasses['account-work-row']} */ ;
+/** @type {__VLS_StyleScopedClasses['table-head']} */ ;
+/** @type {__VLS_StyleScopedClasses['table-row']} */ ;
+/** @type {__VLS_StyleScopedClasses['account-work-row']} */ ;
+/** @type {__VLS_StyleScopedClasses['row-actions']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-button']} */ ;
 /** @type {__VLS_StyleScopedClasses['panel']} */ ;
 /** @type {__VLS_StyleScopedClasses['panel-title']} */ ;
 /** @type {__VLS_StyleScopedClasses['collector-toolbar']} */ ;
@@ -1062,10 +1696,33 @@ else {
 /** @type {__VLS_StyleScopedClasses['text-button']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-button']} */ ;
 /** @type {__VLS_StyleScopedClasses['text-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-button']} */ ;
 /** @type {__VLS_StyleScopedClasses['danger']} */ ;
+/** @type {__VLS_StyleScopedClasses['diagnostics-panel']} */ ;
+/** @type {__VLS_StyleScopedClasses['diagnostics-header']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-button']} */ ;
+/** @type {__VLS_StyleScopedClasses['diagnostics-grid']} */ ;
+/** @type {__VLS_StyleScopedClasses['diagnostics-block']} */ ;
+/** @type {__VLS_StyleScopedClasses['screenshot-list']} */ ;
+/** @type {__VLS_StyleScopedClasses['diagnostics-empty']} */ ;
+/** @type {__VLS_StyleScopedClasses['diagnostics-block']} */ ;
+/** @type {__VLS_StyleScopedClasses['panel']} */ ;
+/** @type {__VLS_StyleScopedClasses['panel-title']} */ ;
+/** @type {__VLS_StyleScopedClasses['model-config-grid']} */ ;
+/** @type {__VLS_StyleScopedClasses['model-config-block']} */ ;
+/** @type {__VLS_StyleScopedClasses['model-config-block']} */ ;
+/** @type {__VLS_StyleScopedClasses['model-config-block']} */ ;
+/** @type {__VLS_StyleScopedClasses['model-test-panel']} */ ;
+/** @type {__VLS_StyleScopedClasses['model-actions']} */ ;
+/** @type {__VLS_StyleScopedClasses['primary']} */ ;
+/** @type {__VLS_StyleScopedClasses['secondary']} */ ;
 /** @type {__VLS_StyleScopedClasses['panel']} */ ;
 /** @type {__VLS_StyleScopedClasses['panel-title']} */ ;
 /** @type {__VLS_StyleScopedClasses['empty']} */ ;
+/** @type {__VLS_StyleScopedClasses['modal-backdrop']} */ ;
+/** @type {__VLS_StyleScopedClasses['work-content-modal']} */ ;
+/** @type {__VLS_StyleScopedClasses['work-content-header']} */ ;
+/** @type {__VLS_StyleScopedClasses['text-button']} */ ;
 var __VLS_dollars;
 const __VLS_self = (await import('vue')).defineComponent({
     setup() {
@@ -1078,6 +1735,10 @@ const __VLS_self = (await import('vue')).defineComponent({
             loginBusy: loginBusy,
             loginPlatform: loginPlatform,
             loginSessionId: loginSessionId,
+            selectedAccountIds: selectedAccountIds,
+            selectedWorkAccount: selectedWorkAccount,
+            accountWorks: accountWorks,
+            selectedAccountWork: selectedAccountWork,
             collectorBusy: collectorBusy,
             importingUrl: importingUrl,
             collectorSources: collectorSources,
@@ -1086,16 +1747,33 @@ const __VLS_self = (await import('vue')).defineComponent({
             collectorSourceKey: collectorSourceKey,
             collectorCategoryKey: collectorCategoryKey,
             publisherBusy: publisherBusy,
+            selectedDiagnostics: selectedDiagnostics,
+            modelBusy: modelBusy,
+            modelStatusText: modelStatusText,
+            modelTestPrompt: modelTestPrompt,
+            modelTestResult: modelTestResult,
+            modelForm: modelForm,
+            modelKeyPlaceholders: modelKeyPlaceholders,
             publishForm: publishForm,
             collectorCategories: collectorCategories,
+            allAccountsSelected: allAccountsSelected,
             refresh: refresh,
+            saveModels: saveModels,
+            runModelTest: runModelTest,
             openLoginSession: openLoginSession,
             confirmLogin: confirmLogin,
+            removeAccount: removeAccount,
+            removeSelectedAccounts: removeSelectedAccounts,
+            syncWorks: syncWorks,
+            showAccountWorks: showAccountWorks,
+            clearAccountWorks: clearAccountWorks,
+            selectAccountWork: selectAccountWork,
             syncCollectorCategory: syncCollectorCategory,
             previewCollector: previewCollector,
             importCollector: importCollector,
             removeRawContent: removeRawContent,
             formatDate: formatDate,
+            metricText: metricText,
             syncPublishDraftForm: syncPublishDraftForm,
             createPublisherTask: createPublisherTask,
             openEditor: openEditor,
@@ -1103,13 +1781,15 @@ const __VLS_self = (await import('vue')).defineComponent({
             markPublished: markPublished,
             markFailed: markFailed,
             cancelTask: cancelTask,
+            showTaskDiagnostics: showTaskDiagnostics,
+            clearDiagnostics: clearDiagnostics,
             removeTask: removeTask,
-            canAutoPublish: canAutoPublish,
             draftTitle: draftTitle,
             taskStatusLabel: taskStatusLabel,
             taskStatusClass: taskStatusClass,
-            isPublishedTask: isPublishedTask,
-            isTerminalTask: isTerminalTask,
+            canShowOpenEditor: canShowOpenEditor,
+            canShowAutoPublish: canShowAutoPublish,
+            canShowPublishingActions: canShowPublishingActions,
         };
     },
 });

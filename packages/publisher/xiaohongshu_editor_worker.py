@@ -1,8 +1,8 @@
 """
 实现逻辑：
 1. 使用已保存的小红书 storage_state 打开图文发布页。
-2. 下载草稿图片并填充标题、正文，并根据参数决定是否点击发布。
-3. 将打开和填充结果写入 result.json，供 API 更新发布任务状态。
+2. 下载草稿图片并填充标题、正文，自动发布时只点击真实发布控件。
+3. 通过成功提示或成功页 URL 确认发布结果，并写入 result.json 供 API 更新状态。
 """
 
 import argparse
@@ -68,7 +68,7 @@ def main() -> None:
             fill_content(page, args.content)
             published = False
             if args.auto_publish:
-                publish_to_xiaohongshu(page)
+                publish_to_xiaohongshu(page, result_file.parent)
                 published = True
 
             write_result(
@@ -145,6 +145,8 @@ def fill_title(page, title: str) -> None:
 
 
 def fill_content(page, content: str) -> None:
+    if fill_xiaohongshu_content_editor(page, content):
+        return
     selectors = [
         "textarea[placeholder*='正文']",
         "textarea[placeholder*='描述']",
@@ -154,6 +156,41 @@ def fill_content(page, content: str) -> None:
         "[class*='desc'] textarea",
     ]
     fill_first_match(page, selectors, content, "未找到小红书正文输入框")
+
+
+def fill_xiaohongshu_content_editor(page, content: str) -> bool:
+    locator = page.locator(
+        "#web > div > div > div.publish-page-container > div > div > div.publish-page-content "
+        "> div.publish-page-content-base > div > div.editor-container > div.editor-content > div > div"
+    ).first
+    try:
+        locator.wait_for(state="visible", timeout=8000)
+        locator.click(timeout=3000)
+        locator.evaluate(
+            """
+            (element, value) => {
+              element.focus();
+              if (element.isContentEditable) {
+                element.textContent = value;
+              } else if ('value' in element) {
+                element.value = value;
+              } else {
+                element.textContent = value;
+              }
+              element.dispatchEvent(new InputEvent('input', {
+                bubbles: true,
+                inputType: 'insertText',
+                data: value
+              }));
+              element.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            """,
+            content,
+        )
+        print("[xiaohongshu] filled specified content editor", flush=True)
+        return True
+    except Exception:
+        return False
 
 
 def fill_first_match(page, selectors: list[str], value: str, error_message: str) -> None:
@@ -171,35 +208,34 @@ def fill_first_match(page, selectors: list[str], value: str, error_message: str)
     raise RuntimeError(error_message)
 
 
-def publish_to_xiaohongshu(page) -> None:
+def publish_to_xiaohongshu(page, run_dir: Path) -> None:
     detect_xiaohongshu_verification(page)
+    take_screenshot(page, run_dir / "before_publish_click.png")
     page.wait_for_timeout(2000)
     click_publish_button(page)
     page.wait_for_timeout(2500)
+    take_screenshot(page, run_dir / "after_publish_click.png")
     detect_xiaohongshu_verification(page)
     click_confirm_publish_if_needed(page)
+    page.wait_for_timeout(1000)
+    take_screenshot(page, run_dir / "after_confirm_click.png")
     wait_publish_result(page)
 
 
 def click_publish_button(page) -> None:
-    locators = [
-        page.get_by_text("发布", exact=True).last,
-        page.get_by_text("发布笔记", exact=False).last,
-        page.get_by_text("立即发布", exact=False).last,
-        page.locator("button").filter(has_text="发布").last,
-        page.locator("[class*='publish']").filter(has_text="发布").last,
-    ]
-    for locator in locators:
-        try:
-            locator.wait_for(state="visible", timeout=10000)
-            if not locator.is_enabled(timeout=3000):
-                continue
-            locator.click()
-            return
-        except Exception:
-            continue
-    raise RuntimeError("未找到可点击的小红书发布按钮")
-
+    locator = page.locator(
+        "#web > div > div > div.publish-page-container > div > div > div.publish-page-content > xhs-publish-btn "
+        "[submit-text='发布'] button.ce-btn.bg-red"
+    ).last
+    try:
+        locator.wait_for(state="visible", timeout=15000)
+        if not locator.is_enabled(timeout=3000):
+            raise RuntimeError("指定小红书发布按钮不可点击")
+        locator.scroll_into_view_if_needed(timeout=3000)
+        locator.click(timeout=8000)
+        print("[xiaohongshu] clicked specified publish button", flush=True)
+    except Exception as e:
+        raise RuntimeError("未找到指定小红书发布按钮") from e
 
 def click_confirm_publish_if_needed(page) -> None:
     locators = [
@@ -220,7 +256,7 @@ def click_confirm_publish_if_needed(page) -> None:
 
 
 def wait_publish_result(page) -> None:
-    success_patterns = ["发布成功", "发布完成", "已发布", "发布笔记成功", "作品管理"]
+    success_patterns = ["发布成功", "发布完成", "发布笔记成功"]
     failure_patterns = ["发布失败", "请上传", "请填写", "审核不通过", "操作失败"]
     deadline = time.time() + 60
     while time.time() < deadline:
@@ -232,7 +268,7 @@ def wait_publish_result(page) -> None:
             for pattern in failure_patterns:
                 if pattern in text:
                     raise RuntimeError(f"小红书发布失败：{pattern}")
-            if page.url and any(part in page.url for part in ["/publish/success", "/manage", "/home"]):
+            if page.url and any(part in page.url for part in ["/publish/success", "/manage"]):
                 return
         except RuntimeError:
             raise
@@ -240,6 +276,13 @@ def wait_publish_result(page) -> None:
             pass
         page.wait_for_timeout(1500)
     raise RuntimeError("等待小红书发布结果超时")
+
+
+def take_screenshot(page, path: Path) -> None:
+    try:
+        page.screenshot(path=str(path), full_page=True, timeout=5000)
+    except Exception:
+        return
 
 
 def detect_xiaohongshu_verification(page) -> None:

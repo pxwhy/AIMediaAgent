@@ -1,14 +1,14 @@
 """
 实现逻辑：
 1. 提供 MVP 阶段通用 CRUD 服务，路由层只负责请求响应。
-2. 创建账号、采集内容、草稿和发布任务时统一写库。
-3. 后续模块复杂后再拆成独立 service。
+2. 创建和展示账号时按平台和 UID 去重，重复登录更新账号登录态。
+3. 删除账号采用禁用状态，同 UID 重复记录一起隐藏，避免破坏历史关联。
 """
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.core_models import Account, PublishDraft, PublishTask, RawContent
+from app.models.core_models import Account, AccountStatus, PublishDraft, PublishTask, RawContent
 from app.schemas.core import (
     AccountCreate,
     PublishDraftCreate,
@@ -18,6 +18,16 @@ from app.schemas.core import (
 
 
 def create_account(db: Session, payload: AccountCreate) -> Account:
+    account = get_account_by_platform_uid(db, payload.platform, payload.uid)
+    if account:
+        data = payload.model_dump()
+        for key, value in data.items():
+            setattr(account, key, value)
+        account.status = AccountStatus.ACTIVE
+        db.commit()
+        db.refresh(account)
+        return account
+
     account = Account(**payload.model_dump())
     db.add(account)
     db.commit()
@@ -25,8 +35,56 @@ def create_account(db: Session, payload: AccountCreate) -> Account:
     return account
 
 
+def get_account_by_platform_uid(db: Session, platform: str, uid: str) -> Account | None:
+    if not platform or not uid:
+        return None
+    return db.scalar(
+        select(Account)
+        .where(Account.platform == platform, Account.uid == uid)
+        .order_by(Account.id.desc())
+    )
+
+
 def list_accounts(db: Session) -> list[Account]:
-    return list(db.scalars(select(Account).order_by(Account.id.desc())).all())
+    accounts = list(
+        db.scalars(
+            select(Account)
+            .where(Account.status != AccountStatus.DISABLED)
+            .order_by(Account.id.desc())
+        ).all()
+    )
+    deduped: list[Account] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for account in accounts:
+        if not account.uid:
+            deduped.append(account)
+            continue
+        key = (account.platform, account.uid)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduped.append(account)
+    return deduped
+
+
+def delete_account(db: Session, account_id: int) -> bool:
+    account = db.get(Account, account_id)
+    if not account:
+        return False
+    accounts = [account]
+    if account.uid:
+        accounts = list(
+            db.scalars(
+                select(Account).where(
+                    Account.platform == account.platform,
+                    Account.uid == account.uid,
+                )
+            ).all()
+        )
+    for item in accounts:
+        item.status = AccountStatus.DISABLED
+    db.commit()
+    return True
 
 
 def create_raw_content(db: Session, payload: RawContentCreate) -> RawContent:

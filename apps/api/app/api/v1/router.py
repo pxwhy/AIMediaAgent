@@ -1,8 +1,8 @@
 """
 实现逻辑：
-1. 注册 MVP 阶段的账号、采集内容、草稿和发布任务接口。
-2. 每类资源先提供创建和列表查询，满足 H5 管理端首屏联调。
-3. 后续再按模块拆分成独立路由文件。
+1. 注册 MVP 阶段的账号、账号作品、模型测试、采集内容、草稿和发布任务接口。
+2. 每类资源提供创建、列表、删除、作品同步、模型连通测试和发布诊断能力，满足 H5 管理端联调。
+3. 账号删除采用禁用状态，后续再按模块拆分成独立路由文件。
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +13,8 @@ from app.models.core_models import PublishTaskStatus
 from app.schemas.core import (
     AccountCreate,
     AccountRead,
+    AccountWorkRead,
+    AccountWorkSyncRead,
     CollectorImportRequest,
     CollectorItemRead,
     CollectorPreviewRequest,
@@ -20,8 +22,13 @@ from app.schemas.core import (
     DraftFromRawContentCreate,
     LoginSessionCreate,
     LoginSessionRead,
+    ModelConfigRead,
+    ModelConfigUpdate,
+    ModelTestRead,
+    ModelTestRequest,
     PublishDraftCreate,
     PublishDraftRead,
+    PublishTaskDiagnosticRead,
     PublishTaskCreate,
     PublishTaskRead,
     PublishTaskStatusUpdate,
@@ -29,7 +36,9 @@ from app.schemas.core import (
     RawContentRead,
 )
 from app.services import crud
+from app.services import account_work_service
 from app.services import login_session_service
+from app.services import model_config_service
 from app.services import publish_service
 from packages.collector import service as collector_service
 
@@ -44,6 +53,56 @@ def create_account(payload: AccountCreate, db: Session = Depends(get_db)):
 @api_router.get("/accounts", response_model=list[AccountRead])
 def list_accounts(db: Session = Depends(get_db)):
     return crud.list_accounts(db)
+
+
+@api_router.delete("/accounts/{account_id}", response_model=dict[str, bool])
+def delete_account(account_id: int, db: Session = Depends(get_db)):
+    deleted = crud.delete_account(db, account_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    return {"deleted": True}
+
+
+@api_router.post("/accounts/{account_id}/sync-works", response_model=AccountWorkSyncRead)
+def sync_account_works(account_id: int, db: Session = Depends(get_db)):
+    try:
+        return account_work_service.sync_account_works(db, account_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@api_router.get("/accounts/{account_id}/works", response_model=list[AccountWorkRead])
+def list_account_works(account_id: int, db: Session = Depends(get_db)):
+    try:
+        return account_work_service.list_account_works(db, account_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@api_router.get("/models/config", response_model=ModelConfigRead)
+def get_model_config(db: Session = Depends(get_db)):
+    return model_config_service.get_model_config(db)
+
+
+@api_router.put("/models/config", response_model=ModelConfigRead)
+def update_model_config(payload: ModelConfigUpdate, db: Session = Depends(get_db)):
+    return model_config_service.update_model_config(db, payload)
+
+
+@api_router.post("/models/test", response_model=ModelTestRead)
+def test_model(payload: ModelTestRequest, db: Session = Depends(get_db)):
+    try:
+        result = model_config_service.test_model(db, payload.prompt)
+        return {
+            "provider": result["provider"],
+            "model": result["model"],
+            "content": result["content"],
+            "usage": result["usage"],
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @api_router.post("/raw-contents", response_model=RawContentRead)
@@ -143,6 +202,14 @@ def create_publish_task(payload: PublishTaskCreate, db: Session = Depends(get_db
 @api_router.get("/publish-tasks", response_model=list[PublishTaskRead])
 def list_publish_tasks(db: Session = Depends(get_db)):
     return crud.list_publish_tasks(db)
+
+
+@api_router.get("/publish-tasks/{task_id}/diagnostics", response_model=PublishTaskDiagnosticRead)
+def get_publish_task_diagnostics(task_id: int, db: Session = Depends(get_db)):
+    try:
+        return publish_service.get_publish_task_diagnostics(db, task_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @api_router.post("/publish-tasks/{task_id}/open-editor", response_model=PublishTaskRead)

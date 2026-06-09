@@ -1,6 +1,6 @@
 """
 实现逻辑：
-1. 定义账号、采集内容、发布草稿、发布任务、发布结果和系统日志核心表。
+1. 定义账号、账号作品、模型配置、采集内容、发布草稿、发布任务、发布结果和系统日志核心表。
 2. 用状态字段表达完整业务流转，避免模块之间直接互相调用。
 3. 保留 JSON 字段存平台扩展数据，方便先跑 MVP 再逐步规范。
 """
@@ -8,7 +8,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -49,6 +49,30 @@ class LoginSessionStatus(StrEnum):
     FAILED = "failed"
 
 
+class ModelProvider(StrEnum):
+    DEEPSEEK = "deepseek"
+    OTHER = "other"
+
+
+class ModelSetting(Base):
+    __tablename__ = "model_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    provider: Mapped[ModelProvider] = mapped_column(Enum(ModelProvider), default=ModelProvider.DEEPSEEK)
+    deepseek_api_key: Mapped[str] = mapped_column(Text, default="")
+    deepseek_base_url: Mapped[str] = mapped_column(String(500), default="https://api.deepseek.com")
+    deepseek_model: Mapped[str] = mapped_column(String(100), default="deepseek-chat")
+    other_api_key: Mapped[str] = mapped_column(Text, default="")
+    other_base_url: Mapped[str] = mapped_column(String(500), default="")
+    other_model: Mapped[str] = mapped_column(String(100), default="")
+    temperature: Mapped[str] = mapped_column(String(20), default="0.7")
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=60)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class Account(Base):
     __tablename__ = "accounts"
 
@@ -67,6 +91,33 @@ class Account(Base):
     )
 
     drafts: Mapped[list["PublishDraft"]] = relationship(back_populates="account")
+    works: Mapped[list["AccountWork"]] = relationship(back_populates="account")
+
+
+class AccountWork(Base):
+    __tablename__ = "account_works"
+    __table_args__ = (
+        UniqueConstraint("platform", "platform_work_id", name="uq_account_works_platform_work"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    platform: Mapped[str] = mapped_column(String(32), index=True)
+    platform_work_id: Mapped[str] = mapped_column(String(255), default="", index=True)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    url: Mapped[str] = mapped_column(String(500), default="")
+    status: Mapped[str] = mapped_column(String(50), default="")
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    raw: Mapped[dict] = mapped_column(JSON, default=dict)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    account: Mapped[Account] = relationship(back_populates="works")
 
 
 class RawContent(Base):

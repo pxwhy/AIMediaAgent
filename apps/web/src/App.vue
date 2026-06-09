@@ -1,8 +1,8 @@
 <!--
 实现逻辑：
-1. 提供 H5 管理端的仪表盘、账号、采集等核心工作台页面。
-2. 账号页负责平台登录态接入，采集页负责热点预览和素材导入。
-3. 页面通过 API 客户端访问后端，不直接处理数据库和平台细节。
+1. 提供 H5 管理端的仪表盘、账号、模型、采集、发布任务等核心工作台页面。
+2. 账号页负责平台登录态接入，模型页负责保存和测试 Agent 模型配置。
+3. 账号页支持单个删除、批量删除和头条号作品同步，发布任务页根据任务状态展示可用操作。
 -->
 
 <template>
@@ -94,21 +94,92 @@
           暂无账号
         </div>
         <div v-else class="table">
-          <div class="table-row table-head">
+          <div class="bulk-actions">
+            <span>已选择 {{ selectedAccountIds.length }} 个账号</span>
+            <button
+              class="text-button danger"
+              @click="removeSelectedAccounts"
+              :disabled="loginBusy || selectedAccountIds.length === 0"
+            >
+              批量删除
+            </button>
+          </div>
+          <div class="table-row table-head account-table-row">
+            <label class="checkbox-cell">
+              <input
+                v-model="allAccountsSelected"
+                type="checkbox"
+                :disabled="loginBusy || dashboard.accounts.length === 0"
+              />
+            </label>
             <span>平台</span>
             <span>昵称</span>
             <span>UID</span>
             <span>状态</span>
             <span>每日上限</span>
+            <span>操作</span>
           </div>
-          <div v-for="account in dashboard.accounts" :key="account.id" class="table-row">
+          <div v-for="account in dashboard.accounts" :key="account.id" class="table-row account-table-row">
+            <label class="checkbox-cell">
+              <input
+                v-model="selectedAccountIds"
+                type="checkbox"
+                :value="account.id"
+                :disabled="loginBusy"
+              />
+            </label>
             <span>{{ account.platform }}</span>
             <span>{{ account.nickname || '-' }}</span>
             <span>{{ account.uid || '-' }}</span>
             <span>{{ account.status }}</span>
             <span>{{ account.daily_publish_limit }}</span>
+            <span class="row-actions">
+              <button class="text-button" @click="syncWorks(account)" :disabled="loginBusy || account.platform !== 'toutiao'">
+                同步作品
+              </button>
+              <button class="text-button" @click="showAccountWorks(account)" :disabled="loginBusy">
+                作品
+              </button>
+              <button class="text-button danger" @click="removeAccount(account)" :disabled="loginBusy">
+                删除
+              </button>
+            </span>
           </div>
         </div>
+        <section v-if="selectedWorkAccount" class="account-works-panel">
+          <div class="account-works-header">
+            <h3>{{ selectedWorkAccount.nickname || selectedWorkAccount.uid || selectedWorkAccount.platform }} 的作品</h3>
+            <button class="text-button" @click="clearAccountWorks">关闭</button>
+          </div>
+          <div v-if="accountWorks.length === 0" class="empty compact-empty">
+            暂无同步作品
+          </div>
+          <div v-else class="table">
+            <div class="table-row account-work-row table-head">
+              <span>标题</span>
+              <span>状态</span>
+              <span>阅读/播放</span>
+              <span>点赞</span>
+              <span>评论</span>
+              <span>同步时间</span>
+              <span>操作</span>
+            </div>
+            <div v-for="work in accountWorks" :key="work.id" class="table-row account-work-row">
+              <span>
+                <a v-if="work.url" :href="work.url" target="_blank" rel="noreferrer">{{ work.title }}</a>
+                <template v-else>{{ work.title }}</template>
+              </span>
+              <span>{{ work.status || '-' }}</span>
+              <span>{{ metricText(work.metrics, 'views') }}</span>
+              <span>{{ metricText(work.metrics, 'likes') }}</span>
+              <span>{{ metricText(work.metrics, 'comments') }}</span>
+              <span>{{ formatDate(work.synced_at) }}</span>
+              <span class="row-actions">
+                <button class="text-button" @click="selectAccountWork(work)">内容</button>
+              </span>
+            </div>
+          </div>
+        </section>
       </section>
 
       <section v-else-if="activePage === 'collector'" class="panel">
@@ -293,43 +364,150 @@
             <span>{{ formatDate(task.created_at) }}</span>
             <span class="row-actions task-actions">
               <button
+                v-if="canShowOpenEditor(task.status)"
                 class="text-button"
                 @click="openEditor(task)"
-                :disabled="publisherBusy || isTerminalTask(task.status)"
+                :disabled="publisherBusy"
               >
-                打开编辑页
+                打开
               </button>
               <button
+                v-if="canShowAutoPublish(task)"
                 class="text-button danger"
                 @click="autoPublish(task)"
-                :disabled="publisherBusy || isTerminalTask(task.status) || !canAutoPublish(task.platform)"
+                :disabled="publisherBusy"
               >
                 自动发布
               </button>
               <button
+                v-if="canShowPublishingActions(task.status)"
                 class="text-button"
                 @click="markPublished(task.id)"
-                :disabled="isPublishedTask(task.status)"
               >
                 已发布
               </button>
               <button
+                v-if="canShowPublishingActions(task.status)"
                 class="text-button"
                 @click="markFailed(task.id)"
-                :disabled="isTerminalTask(task.status)"
               >
                 失败
               </button>
               <button
+                v-if="canShowPublishingActions(task.status)"
                 class="text-button"
                 @click="cancelTask(task.id)"
-                :disabled="isTerminalTask(task.status)"
               >
                 取消
+              </button>
+              <button class="text-button" @click="showTaskDiagnostics(task.id)" :disabled="publisherBusy">
+                详情
               </button>
               <button class="text-button danger" @click="removeTask(task.id)">删除</button>
             </span>
           </div>
+        </div>
+        <section v-if="selectedDiagnostics" class="diagnostics-panel">
+          <div class="diagnostics-header">
+            <h3>任务 #{{ selectedDiagnostics.task_id }}</h3>
+            <button class="text-button" @click="clearDiagnostics">关闭</button>
+          </div>
+          <div class="diagnostics-grid">
+            <span>状态</span>
+            <strong>{{ taskStatusLabel(selectedDiagnostics.status) }}</strong>
+            <span>运行目录</span>
+            <strong>{{ selectedDiagnostics.run_dir }}</strong>
+            <span>平台链接</span>
+            <strong>{{ selectedDiagnostics.result?.platform_url || '-' }}</strong>
+            <span>失败原因</span>
+            <strong>{{ selectedDiagnostics.result?.error_message || '-' }}</strong>
+          </div>
+          <div class="diagnostics-block">
+            <h4>截图</h4>
+            <div v-if="selectedDiagnostics.screenshots.length" class="screenshot-list">
+              <span v-for="name in selectedDiagnostics.screenshots" :key="name">{{ name }}</span>
+            </div>
+            <div v-else class="diagnostics-empty">暂无截图</div>
+          </div>
+          <div class="diagnostics-block">
+            <h4>Worker 日志</h4>
+            <pre>{{ selectedDiagnostics.logs || '暂无日志' }}</pre>
+          </div>
+        </section>
+      </section>
+
+      <section v-else-if="activePage === 'models'" class="panel">
+        <div class="panel-title">
+          <h2>模型配置</h2>
+          <span>{{ modelStatusText }}</span>
+        </div>
+        <div class="model-config-grid">
+          <section class="model-config-block">
+            <h3>默认模型</h3>
+            <label>
+              <span>当前模型</span>
+              <select v-model="modelForm.provider">
+                <option value="deepseek">DeepSeek</option>
+                <option value="other">其他模型</option>
+              </select>
+            </label>
+            <label>
+              <span>Temperature</span>
+              <input v-model.number="modelForm.temperature" type="number" min="0" max="2" step="0.1" />
+            </label>
+            <label>
+              <span>Timeout 秒数</span>
+              <input v-model.number="modelForm.timeout_seconds" type="number" min="5" max="300" />
+            </label>
+          </section>
+
+          <section class="model-config-block">
+            <h3>DeepSeek</h3>
+            <label>
+              <span>API Key</span>
+              <input
+                v-model.trim="modelForm.deepseek_api_key"
+                type="password"
+                :placeholder="modelKeyPlaceholders.deepseek"
+              />
+            </label>
+            <label>
+              <span>Base URL</span>
+              <input v-model.trim="modelForm.deepseek_base_url" />
+            </label>
+            <label>
+              <span>Model</span>
+              <input v-model.trim="modelForm.deepseek_model" />
+            </label>
+          </section>
+
+          <section class="model-config-block">
+            <h3>其他模型</h3>
+            <label>
+              <span>API Key</span>
+              <input
+                v-model.trim="modelForm.other_api_key"
+                type="password"
+                :placeholder="modelKeyPlaceholders.other"
+              />
+            </label>
+            <label>
+              <span>Base URL</span>
+              <input v-model.trim="modelForm.other_base_url" placeholder="https://example.com/v1" />
+            </label>
+            <label>
+              <span>Model</span>
+              <input v-model.trim="modelForm.other_model" />
+            </label>
+          </section>
+        </div>
+        <div class="model-test-panel">
+          <textarea v-model="modelTestPrompt" rows="4" placeholder="输入测试提示词"></textarea>
+          <div class="model-actions">
+            <button class="primary" @click="saveModels" :disabled="modelBusy">保存配置</button>
+            <button class="secondary" @click="runModelTest" :disabled="modelBusy">测试模型</button>
+          </div>
+          <pre v-if="modelTestResult">{{ modelTestResult }}</pre>
         </div>
       </section>
 
@@ -341,6 +519,15 @@
         <div class="empty">该模块页面正在接入，当前先完成账号和仪表盘。</div>
       </section>
     </section>
+    <div v-if="selectedAccountWork" class="modal-backdrop" @click.self="selectedAccountWork = null">
+      <section class="work-content-modal" role="dialog" aria-modal="true">
+        <div class="work-content-header">
+          <h4>{{ selectedAccountWork.title }}</h4>
+          <button class="text-button" @click="selectedAccountWork = null">关闭</button>
+        </div>
+        <pre>{{ selectedAccountWork.content || '暂无正文，下次同步会继续尝试补全。' }}</pre>
+      </section>
+    </div>
   </main>
 </template>
 
@@ -352,28 +539,40 @@ import {
   createDraftFromRawContent,
   createPublishTask,
   deleteRawContent,
+  deleteAccount,
   deletePublishTask,
   importCollectorItem,
   confirmLoginSession,
   createLoginSession,
+  loadAccountWorks,
   loadCollectorSources,
   loadDashboard,
+  loadModelConfig,
+  loadPublishTaskDiagnostics,
   markPublishTaskFailed,
   markPublishTaskPublished,
   openPublishEditor,
+  type Account,
+  type AccountWork,
+  type ModelConfig,
   previewCollectorItems,
+  saveModelConfig,
+  testModel,
   type CollectorItem,
   type CollectorSource,
   type DashboardPayload,
+  type PublishTaskDiagnostics,
   type PublishTask,
-  type RawContent
+  type RawContent,
+  syncAccountWorks
 } from './api/client'
 
-type PageKey = 'dashboard' | 'accounts' | 'collector' | 'drafts' | 'publisher' | 'analytics'
+type PageKey = 'dashboard' | 'accounts' | 'models' | 'collector' | 'drafts' | 'publisher' | 'analytics'
 
 const navItems: Array<{ key: PageKey; label: string; description: string }> = [
   { key: 'dashboard', label: '仪表盘', description: '采集、Agent、审核、发布和复盘的轻量闭环。' },
   { key: 'accounts', label: '账号', description: '管理平台账号、登录态和每日发布限制。' },
+  { key: 'models', label: '模型', description: '配置 DeepSeek 或其他兼容模型，供 Agent 统一调用。' },
   { key: 'collector', label: '采集', description: '查看热点采集结果和原始内容。' },
   { key: 'drafts', label: '草稿', description: '查看 Agent 生成草稿并进行人工审核。' },
   { key: 'publisher', label: '发布', description: '管理待发布、发布中和失败任务。' },
@@ -392,6 +591,10 @@ const currentNav = computed(() => navItems.find((item) => item.key === activePag
 const loginBusy = ref(false)
 const loginPlatform = ref('toutiao')
 const loginSessionId = ref('')
+const selectedAccountIds = ref<number[]>([])
+const selectedWorkAccount = ref<Account | null>(null)
+const accountWorks = ref<AccountWork[]>([])
+const selectedAccountWork = ref<AccountWork | null>(null)
 const collectorBusy = ref(false)
 const importingUrl = ref('')
 const collectorSources = ref<CollectorSource[]>([])
@@ -400,6 +603,26 @@ const selectedRawContent = ref<RawContent | null>(null)
 const collectorSourceKey = ref('ithome')
 const collectorCategoryKey = ref('home')
 const publisherBusy = ref(false)
+const selectedDiagnostics = ref<PublishTaskDiagnostics | null>(null)
+const modelBusy = ref(false)
+const modelStatusText = ref('等待加载')
+const modelTestPrompt = ref('')
+const modelTestResult = ref('')
+const modelForm = reactive({
+  provider: 'deepseek' as 'deepseek' | 'other',
+  deepseek_api_key: '',
+  deepseek_base_url: 'https://api.deepseek.com',
+  deepseek_model: 'deepseek-chat',
+  other_api_key: '',
+  other_base_url: '',
+  other_model: '',
+  temperature: 0.7,
+  timeout_seconds: 60
+})
+const modelKeyPlaceholders = reactive({
+  deepseek: '未配置',
+  other: '未配置'
+})
 const publishForm = reactive({
   raw_content_id: 0,
   account_id: 0,
@@ -410,6 +633,14 @@ const collectorCategories = computed(() => {
   const source = collectorSources.value.find((item) => item.key === collectorSourceKey.value)
   return source?.categories ?? []
 })
+const allAccountsSelected = computed({
+  get() {
+    return dashboard.accounts.length > 0 && selectedAccountIds.value.length === dashboard.accounts.length
+  },
+  set(checked: boolean) {
+    selectedAccountIds.value = checked ? dashboard.accounts.map((account) => account.id) : []
+  }
+})
 
 async function refresh() {
   statusText.value = '加载中'
@@ -419,10 +650,72 @@ async function refresh() {
     dashboard.rawContents = data.rawContents
     dashboard.drafts = data.drafts
     dashboard.publishTasks = data.publishTasks
+    const accountIds = new Set(data.accounts.map((account) => account.id))
+    selectedAccountIds.value = selectedAccountIds.value.filter((accountId) => accountIds.has(accountId))
     statusText.value = '已同步'
   } catch (error) {
     console.error(error)
     statusText.value = 'API 未连接'
+  }
+}
+
+function applyModelConfig(config: ModelConfig) {
+  modelForm.provider = config.provider
+  modelForm.deepseek_api_key = ''
+  modelForm.deepseek_base_url = config.deepseek_base_url
+  modelForm.deepseek_model = config.deepseek_model
+  modelForm.other_api_key = ''
+  modelForm.other_base_url = config.other_base_url
+  modelForm.other_model = config.other_model
+  modelForm.temperature = config.temperature
+  modelForm.timeout_seconds = config.timeout_seconds
+  modelKeyPlaceholders.deepseek = config.deepseek_api_key_configured ? '已配置，留空则不修改' : '未配置'
+  modelKeyPlaceholders.other = config.other_api_key_configured ? '已配置，留空则不修改' : '未配置'
+}
+
+async function loadModels() {
+  modelStatusText.value = '加载中'
+  try {
+    applyModelConfig(await loadModelConfig())
+    modelStatusText.value = '模型配置已加载'
+  } catch (error) {
+    console.error(error)
+    modelStatusText.value = '模型配置加载失败'
+  }
+}
+
+async function saveModels() {
+  modelBusy.value = true
+  modelStatusText.value = '正在保存模型配置'
+  try {
+    const config = await saveModelConfig({ ...modelForm })
+    applyModelConfig(config)
+    modelStatusText.value = '模型配置已保存'
+  } catch (error) {
+    console.error(error)
+    modelStatusText.value = '模型配置保存失败'
+  } finally {
+    modelBusy.value = false
+  }
+}
+
+async function runModelTest() {
+  if (!modelTestPrompt.value.trim()) {
+    modelStatusText.value = '请输入测试提示词'
+    return
+  }
+  modelBusy.value = true
+  modelStatusText.value = '正在测试模型'
+  modelTestResult.value = ''
+  try {
+    const result = await testModel(modelTestPrompt.value)
+    modelTestResult.value = `${result.provider} / ${result.model}\n\n${result.content}`
+    modelStatusText.value = '模型测试成功'
+  } catch (error) {
+    console.error(error)
+    modelStatusText.value = '模型测试失败'
+  } finally {
+    modelBusy.value = false
   }
 }
 
@@ -453,7 +746,7 @@ async function confirmLogin() {
     if (session.status === 'completed') {
       loginSessionId.value = ''
       await refresh()
-      statusText.value = '登录态已保存，账号已添加'
+      statusText.value = '登录态已保存，账号已同步'
     } else {
       statusText.value = session.error_message || '登录确认失败'
     }
@@ -463,6 +756,105 @@ async function confirmLogin() {
   } finally {
     loginBusy.value = false
   }
+}
+
+async function removeAccount(account: Account) {
+  if (!window.confirm(`确认删除「${account.nickname || account.uid || account.platform}」吗？`)) {
+    return
+  }
+
+  loginBusy.value = true
+  statusText.value = '正在删除账号'
+  try {
+    await deleteAccount(account.id)
+    selectedAccountIds.value = selectedAccountIds.value.filter((accountId) => accountId !== account.id)
+    if (selectedWorkAccount.value?.id === account.id) {
+      clearAccountWorks()
+    }
+    if (publishForm.account_id === account.id) {
+      publishForm.account_id = 0
+    }
+    await refresh()
+    statusText.value = '账号已删除'
+  } catch (error) {
+    console.error(error)
+    statusText.value = '账号删除失败'
+  } finally {
+    loginBusy.value = false
+  }
+}
+
+async function removeSelectedAccounts() {
+  const accountIds = [...selectedAccountIds.value]
+  if (accountIds.length === 0) {
+    return
+  }
+  if (!window.confirm(`确认删除已选中的 ${accountIds.length} 个账号吗？`)) {
+    return
+  }
+
+  loginBusy.value = true
+  statusText.value = '正在批量删除账号'
+  try {
+    await Promise.all(accountIds.map((accountId) => deleteAccount(accountId)))
+    if (accountIds.includes(publishForm.account_id)) {
+      publishForm.account_id = 0
+    }
+    if (selectedWorkAccount.value && accountIds.includes(selectedWorkAccount.value.id)) {
+      clearAccountWorks()
+    }
+    selectedAccountIds.value = []
+    await refresh()
+    statusText.value = `已删除 ${accountIds.length} 个账号`
+  } catch (error) {
+    console.error(error)
+    statusText.value = '批量删除账号失败'
+  } finally {
+    loginBusy.value = false
+  }
+}
+
+async function syncWorks(account: Account) {
+  loginBusy.value = true
+  statusText.value = '正在同步作品'
+  try {
+    const result = await syncAccountWorks(account.id)
+    selectedWorkAccount.value = account
+    accountWorks.value = await loadAccountWorks(account.id)
+    selectedAccountWork.value = null
+    statusText.value = result.message || `已同步 ${result.synced_count} 条作品`
+  } catch (error) {
+    console.error(error)
+    statusText.value = '同步作品失败'
+  } finally {
+    loginBusy.value = false
+  }
+}
+
+async function showAccountWorks(account: Account) {
+  loginBusy.value = true
+  statusText.value = '正在加载作品'
+  try {
+    selectedWorkAccount.value = account
+    accountWorks.value = await loadAccountWorks(account.id)
+    selectedAccountWork.value = null
+    statusText.value = '作品已加载'
+  } catch (error) {
+    console.error(error)
+    statusText.value = '作品加载失败'
+  } finally {
+    loginBusy.value = false
+  }
+}
+
+function clearAccountWorks() {
+  selectedWorkAccount.value = null
+  accountWorks.value = []
+  selectedAccountWork.value = null
+}
+
+function selectAccountWork(work: AccountWork) {
+  selectedAccountWork.value = work
 }
 
 async function loadCollectors() {
@@ -551,6 +943,14 @@ async function removeRawContent(content: RawContent) {
 
 function formatDate(value: string) {
   return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
+}
+
+function metricText(metrics: Record<string, unknown>, key: string) {
+  const value = metrics[key]
+  if (value === undefined || value === null || value === '') {
+    return '-'
+  }
+  return String(value)
 }
 
 function syncPublishDraftForm() {
@@ -672,6 +1072,24 @@ async function cancelTask(taskId: number) {
   }
 }
 
+async function showTaskDiagnostics(taskId: number) {
+  publisherBusy.value = true
+  statusText.value = '正在加载任务详情'
+  try {
+    selectedDiagnostics.value = await loadPublishTaskDiagnostics(taskId)
+    statusText.value = '任务详情已加载'
+  } catch (error) {
+    console.error(error)
+    statusText.value = '任务详情加载失败'
+  } finally {
+    publisherBusy.value = false
+  }
+}
+
+function clearDiagnostics() {
+  selectedDiagnostics.value = null
+}
+
 async function removeTask(taskId: number) {
   if (!window.confirm('确认删除这个发布任务吗？')) {
     return
@@ -730,11 +1148,24 @@ function isPublishedTask(status: string) {
   return normalizeStatus(status) === 'published'
 }
 
+function canShowOpenEditor(status: string) {
+  return ['pending'].includes(normalizeStatus(status))
+}
+
+function canShowAutoPublish(task: PublishTask) {
+  const status = normalizeStatus(task.status)
+  return ['pending', 'failed'].includes(status) && canAutoPublish(task.platform)
+}
+
+function canShowPublishingActions(status: string) {
+  return normalizeStatus(status) === 'publishing'
+}
+
 function isTerminalTask(status: string) {
   return ['published', 'failed', 'canceled'].includes(normalizeStatus(status))
 }
 
 onMounted(async () => {
-  await Promise.all([refresh(), loadCollectors()])
+  await Promise.all([refresh(), loadCollectors(), loadModels()])
 })
 </script>

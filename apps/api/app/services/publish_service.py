@@ -1,8 +1,8 @@
 """
 实现逻辑：
-1. 提供发布管理的业务操作：素材转草稿、任务状态流转、打开平台编辑页。
+1. 提供发布管理的业务操作：素材转草稿、任务状态流转、打开平台编辑页和诊断信息。
 2. 发布执行只消费草稿和账号登录态，不直接参与采集和 Agent 生成。
-3. 头条号支持人工确认编辑页和明确触发的单任务自动发布，小红书仅支持人工确认发布页。
+3. 支持人工确认编辑页和明确触发的单任务自动发布，由平台 worker 执行真实发布动作。
 """
 
 import json
@@ -107,6 +107,39 @@ def delete_publish_task(db: Session, task_id: int) -> bool:
     db.delete(task)
     db.commit()
     return True
+
+
+def get_publish_task_diagnostics(db: Session, task_id: int) -> dict:
+    task = db.get(PublishTask, task_id)
+    if not task:
+        raise ValueError("发布任务不存在")
+
+    run_dir = PUBLISH_RUN_DIR / str(task.id)
+    log_file = run_dir / "worker.log"
+    screenshot_names = []
+    if run_dir.exists():
+        screenshot_names = sorted(
+            path.name for path in run_dir.iterdir() if path.suffix.lower() == ".png"
+        )
+
+    result = None
+    if task.result:
+        result = {
+            "success": bool(task.result.success),
+            "platform_url": task.result.platform_url,
+            "error_message": task.result.error_message,
+            "raw_response": task.result.raw_response,
+            "published_at": task.result.published_at,
+        }
+
+    return {
+        "task_id": task.id,
+        "status": task.status.value,
+        "result": result,
+        "run_dir": str(run_dir.relative_to(PROJECT_ROOT)),
+        "logs": log_file.read_text(encoding="utf-8") if log_file.exists() else "",
+        "screenshots": screenshot_names,
+    }
 
 
 def open_publish_editor(db: Session, task_id: int) -> PublishTask:

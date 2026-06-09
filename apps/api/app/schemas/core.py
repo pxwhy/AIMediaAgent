@@ -1,8 +1,8 @@
 """
 实现逻辑：
 1. 定义 API 输入输出结构，和数据库模型解耦。
-2. MVP 先覆盖账号、采集内容、草稿和发布任务的创建与展示。
-3. 前端只依赖这些 schema，不直接理解数据库字段细节。
+2. MVP 覆盖账号、账号作品、模型配置与测试、采集内容、草稿、发布任务和发布诊断的创建与展示。
+3. 前端只依赖这些 schema，不直接理解数据库字段和运行目录细节。
 """
 
 from datetime import datetime
@@ -25,6 +25,57 @@ class AccountRead(AccountCreate):
     id: int
     status: str
     created_at: datetime
+
+
+class AccountWorkRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    account_id: int
+    platform: str
+    platform_work_id: str
+    title: str
+    content: str = ""
+    url: str
+    status: str
+    metrics: dict[str, Any] = {}
+    raw: dict[str, Any] = {}
+    published_at: datetime | None = None
+    synced_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
+class AccountWorkSyncRead(BaseModel):
+    account_id: int
+    platform: str
+    synced_count: int
+    total_count: int
+    message: str = ""
+
+
+class ModelConfigRead(BaseModel):
+    provider: str = "deepseek"
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+    deepseek_api_key_configured: bool = False
+    other_base_url: str = ""
+    other_model: str = ""
+    other_api_key_configured: bool = False
+    temperature: float = 0.7
+    timeout_seconds: int = 60
+
+
+class ModelConfigUpdate(BaseModel):
+    provider: str = "deepseek"
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+    other_api_key: str = ""
+    other_base_url: str = ""
+    other_model: str = ""
+    temperature: float = 0.7
+    timeout_seconds: int = 60
 
 
 class RawContentCreate(BaseModel):
@@ -128,6 +179,23 @@ class PublishTaskStatusUpdate(BaseModel):
     error_message: str = ""
 
 
+class PublishResultDiagnosticRead(BaseModel):
+    success: bool = False
+    platform_url: str = ""
+    error_message: str = ""
+    raw_response: dict[str, Any] = {}
+    published_at: datetime | None = None
+
+
+class PublishTaskDiagnosticRead(BaseModel):
+    task_id: int
+    status: str
+    result: PublishResultDiagnosticRead | None = None
+    run_dir: str
+    logs: str = ""
+    screenshots: list[str] = []
+
+
 class LoginSessionCreate(BaseModel):
     platform: str
 
@@ -144,3 +212,14 @@ class LoginSessionRead(BaseModel):
     error_message: str
     created_at: datetime
     updated_at: datetime
+
+
+class ModelTestRequest(BaseModel):
+    prompt: str = ""
+
+
+class ModelTestRead(BaseModel):
+    provider: str
+    model: str
+    content: str
+    usage: dict[str, Any] = {}
