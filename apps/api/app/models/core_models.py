@@ -1,6 +1,6 @@
 """
 实现逻辑：
-1. 定义账号、账号作品、模型配置、采集内容、发布草稿、发布任务、发布结果和系统日志核心表。
+1. 定义账号、账号作品、模型配置、Agent 配置、Skill 配置、复盘报告、账号肖像、采集内容、发布草稿、发布任务、发布结果和系统日志核心表。
 2. 用状态字段表达完整业务流转，避免模块之间直接互相调用。
 3. 保留 JSON 字段存平台扩展数据，方便先跑 MVP 再逐步规范。
 """
@@ -54,11 +54,26 @@ class ModelProvider(StrEnum):
     OTHER = "other"
 
 
+class AgentType(StrEnum):
+    ACCOUNT_REVIEW = "account_review"
+    CONTENT_SELECTION = "content_selection"
+    ACCOUNT_PROFILE = "account_profile"
+
+
+class SkillType(StrEnum):
+    PROMPT = "prompt"
+
+
 class ModelSetting(Base):
     __tablename__ = "model_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(100), default="默认模型")
     provider: Mapped[ModelProvider] = mapped_column(Enum(ModelProvider), default=ModelProvider.DEEPSEEK)
+    api_key: Mapped[str] = mapped_column(Text, default="")
+    base_url: Mapped[str] = mapped_column(String(500), default="https://api.deepseek.com")
+    model: Mapped[str] = mapped_column(String(100), default="deepseek-chat")
+    is_default: Mapped[int] = mapped_column(Integer, default=0)
     deepseek_api_key: Mapped[str] = mapped_column(Text, default="")
     deepseek_base_url: Mapped[str] = mapped_column(String(500), default="https://api.deepseek.com")
     deepseek_model: Mapped[str] = mapped_column(String(100), default="deepseek-chat")
@@ -71,6 +86,73 @@ class ModelSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+
+class AgentSetting(Base):
+    __tablename__ = "agent_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(100), default="账号复盘默认 Agent")
+    agent_type: Mapped[AgentType] = mapped_column(Enum(AgentType), default=AgentType.ACCOUNT_REVIEW)
+    model_config_id: Mapped[int | None] = mapped_column(ForeignKey("model_settings.id"), nullable=True)
+    system_prompt: Mapped[str] = mapped_column(Text, default="")
+    user_prompt_template: Mapped[str] = mapped_column(Text, default="")
+    skill_ids: Mapped[list] = mapped_column(JSON, default=list)
+    skill_paths: Mapped[list] = mapped_column(JSON, default=list)
+    enabled: Mapped[int] = mapped_column(Integer, default=1)
+    is_default: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class SkillSetting(Base):
+    __tablename__ = "skill_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(100), default="")
+    skill_type: Mapped[SkillType] = mapped_column(Enum(SkillType), default=SkillType.PROMPT)
+    description: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class AccountReviewReport(Base):
+    __tablename__ = "account_review_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    agent_id: Mapped[int | None] = mapped_column(ForeignKey("agent_settings.id"), nullable=True)
+    model_config_id: Mapped[int | None] = mapped_column(ForeignKey("model_settings.id"), nullable=True)
+    provider: Mapped[str] = mapped_column(String(50), default="")
+    model: Mapped[str] = mapped_column(String(100), default="")
+    report: Mapped[dict] = mapped_column(JSON, default=dict)
+    raw_report: Mapped[str] = mapped_column(Text, default="")
+    works_count: Mapped[int] = mapped_column(Integer, default=0)
+    usage: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AccountProfileReport(Base):
+    __tablename__ = "account_profile_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    review_report_id: Mapped[int | None] = mapped_column(ForeignKey("account_review_reports.id"), nullable=True)
+    agent_id: Mapped[int | None] = mapped_column(ForeignKey("agent_settings.id"), nullable=True)
+    model_config_id: Mapped[int | None] = mapped_column(ForeignKey("model_settings.id"), nullable=True)
+    provider: Mapped[str] = mapped_column(String(50), default="")
+    model: Mapped[str] = mapped_column(String(100), default="")
+    profile: Mapped[dict] = mapped_column(JSON, default=dict)
+    raw_report: Mapped[str] = mapped_column(Text, default="")
+    works_count: Mapped[int] = mapped_column(Integer, default=0)
+    usage: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class Account(Base):

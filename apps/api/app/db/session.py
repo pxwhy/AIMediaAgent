@@ -43,12 +43,35 @@ def _ensure_sqlite_columns() -> None:
     if not settings.database_url.startswith("sqlite"):
         return
     with engine.begin() as connection:
-        tables = connection.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).scalars()
-        if "account_works" not in set(tables):
-            return
-        columns = {
-            row[1]
-            for row in connection.execute(text("PRAGMA table_info(account_works)")).fetchall()
-        }
-        if "content" not in columns:
-            connection.execute(text("ALTER TABLE account_works ADD COLUMN content TEXT DEFAULT ''"))
+        tables = set(connection.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).scalars())
+        if "account_works" in tables:
+            columns = {
+                row[1]
+                for row in connection.execute(text("PRAGMA table_info(account_works)")).fetchall()
+            }
+            if "content" not in columns:
+                connection.execute(text("ALTER TABLE account_works ADD COLUMN content TEXT DEFAULT ''"))
+        if "model_settings" in tables:
+            columns = {
+                row[1]
+                for row in connection.execute(text("PRAGMA table_info(model_settings)")).fetchall()
+            }
+            model_columns = {
+                "name": "TEXT DEFAULT '默认模型'",
+                "api_key": "TEXT DEFAULT ''",
+                "base_url": "VARCHAR(500) DEFAULT ''",
+                "model": "VARCHAR(100) DEFAULT ''",
+                "is_default": "INTEGER DEFAULT 0",
+            }
+            for column, definition in model_columns.items():
+                if column not in columns:
+                    connection.execute(text(f"ALTER TABLE model_settings ADD COLUMN {column} {definition}"))
+        if "agent_settings" in tables:
+            columns = {
+                row[1]
+                for row in connection.execute(text("PRAGMA table_info(agent_settings)")).fetchall()
+            }
+            if "skill_ids" not in columns:
+                connection.execute(text("ALTER TABLE agent_settings ADD COLUMN skill_ids JSON DEFAULT '[]'"))
+            if "skill_paths" not in columns:
+                connection.execute(text("ALTER TABLE agent_settings ADD COLUMN skill_paths JSON DEFAULT '[]'"))

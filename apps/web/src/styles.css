@@ -1,3 +1,10 @@
+/*
+实现逻辑：
+1. 提供 H5 管理端统一的布局、表格、表单、弹框和状态样式。
+2. 各业务页面复用紧凑面板与操作区，保证账号、模型、Agent、Skills、采集、发布和复盘页面视觉一致。
+3. 移动端通过单列布局降级，避免表格和操作按钮挤压错位。
+*/
+
 * {
   box-sizing: border-box;
 }
@@ -261,10 +268,202 @@ h1 {
   border-radius: 6px;
 }
 
+.review-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.review-toolbar label {
+  display: grid;
+  gap: 6px;
+}
+
+.review-toolbar span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.review-toolbar select {
+  height: 38px;
+  min-width: 0;
+  padding: 0 10px;
+  color: #172033;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+}
+
+.skills-local-toolbar {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) auto auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.skills-local-toolbar label {
+  display: grid;
+  gap: 6px;
+}
+
+.skills-local-toolbar span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.skills-local-toolbar input {
+  height: 38px;
+  min-width: 0;
+  padding: 0 10px;
+  color: #172033;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+}
+
 .model-config-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 16px;
+  margin-top: 16px;
+}
+
+.model-config-table,
+.agent-config-table,
+.skill-config-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.model-config-table th,
+.model-config-table td,
+.agent-config-table th,
+.agent-config-table td,
+.skill-config-table th,
+.skill-config-table td {
+  padding: 12px 14px;
+  overflow: hidden;
+  color: #172033;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.model-config-table th,
+.agent-config-table th,
+.skill-config-table th {
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 500;
+  background: #f8fafc;
+}
+
+.model-config-table th:nth-child(1),
+.model-config-table td:nth-child(1) {
+  width: 28%;
+}
+
+.model-config-table th:nth-child(2),
+.model-config-table td:nth-child(2) {
+  width: 90px;
+}
+
+.model-config-table th:nth-child(4),
+.model-config-table td:nth-child(4),
+.model-config-table th:nth-child(5),
+.model-config-table td:nth-child(5) {
+  width: 72px;
+}
+
+.model-config-table th:nth-child(6),
+.model-config-table td:nth-child(6) {
+  width: 190px;
+  overflow: visible;
+}
+
+.model-config-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.agent-config-table th:nth-child(1),
+.agent-config-table td:nth-child(1) {
+  width: 26%;
+}
+
+.agent-config-table th:nth-child(2),
+.agent-config-table td:nth-child(2) {
+  width: 100px;
+}
+
+.agent-config-table th:nth-child(4),
+.agent-config-table td:nth-child(4),
+.agent-config-table th:nth-child(5),
+.agent-config-table td:nth-child(5) {
+  width: 72px;
+}
+
+.agent-config-table th:nth-child(3),
+.agent-config-table td:nth-child(3),
+.agent-config-table th:nth-child(4),
+.agent-config-table td:nth-child(4) {
+  width: 18%;
+}
+
+.agent-config-table th:nth-child(5),
+.agent-config-table td:nth-child(5),
+.agent-config-table th:nth-child(6),
+.agent-config-table td:nth-child(6) {
+  width: 72px;
+}
+
+.agent-config-table th:nth-child(7),
+.agent-config-table td:nth-child(7) {
+  width: 190px;
+  overflow: visible;
+}
+
+.agent-config-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.skill-config-table th:nth-child(1),
+.skill-config-table td:nth-child(1) {
+  width: 24%;
+}
+
+.skill-config-table th:nth-child(2),
+.skill-config-table td:nth-child(2) {
+  width: 34%;
+}
+
+.skill-config-table th:nth-child(4),
+.skill-config-table td:nth-child(4) {
+  width: 140px;
+  overflow: visible;
+}
+
+.skill-config-table td:nth-child(3) {
+  overflow-wrap: anywhere;
+}
+
+.skill-config-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.model-row-actions {
+  justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow: visible;
+  white-space: nowrap;
 }
 
 .model-config-block {
@@ -276,15 +475,40 @@ h1 {
   border-radius: 6px;
 }
 
+.model-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #64748b;
+  font-size: 14px;
+}
+
 .model-config-block h3 {
   margin: 0;
   font-size: 16px;
 }
 
 .model-config-block label,
-.model-test-panel {
+.model-test-panel,
+.agent-prompt-block {
   display: grid;
   gap: 8px;
+}
+
+.model-config-block .inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-config-block .inline-check input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
 }
 
 .model-config-block span {
@@ -294,7 +518,8 @@ h1 {
 
 .model-config-block input,
 .model-config-block select,
-.model-test-panel textarea {
+.model-test-panel textarea,
+.agent-prompt-block textarea {
   width: 100%;
   padding: 0 10px;
   color: #172033;
@@ -332,6 +557,104 @@ h1 {
   margin: 0;
   padding: 12px;
   color: #334155;
+  white-space: pre-wrap;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.model-config-modal,
+.agent-config-modal,
+.skill-config-modal {
+  display: grid;
+  gap: 14px;
+  width: min(720px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
+  padding: 18px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgb(15 23 42 / 20%);
+}
+
+.modal-form-block {
+  padding: 0;
+  background: #ffffff;
+  border: 0;
+}
+
+.agent-prompt-block {
+  padding-top: 2px;
+}
+
+.skill-picker {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.skill-picker-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.skill-picker-title strong {
+  color: #172033;
+  font-weight: 500;
+}
+
+.skill-check {
+  display: grid;
+  grid-template-columns: 16px minmax(100px, 180px) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  color: #172033;
+  font-size: 14px;
+}
+
+.skill-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.skill-check small {
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-skill-detail {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.local-skill-detail p {
+  color: #64748b;
+  overflow-wrap: anywhere;
+}
+
+.local-skill-detail pre {
+  max-height: 420px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  color: #334155;
+  line-height: 1.7;
   white-space: pre-wrap;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
@@ -406,9 +729,42 @@ h1 {
   white-space: nowrap;
 }
 
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.pagination-bar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pagination-bar select {
+  height: 30px;
+  padding: 0 24px 0 8px;
+  color: #0f172a;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  outline: none;
+}
+
+.pagination-bar strong {
+  min-width: 48px;
+  color: #334155;
+  font-weight: 500;
+  text-align: center;
+}
+
 .collector-table-head,
 .collector-table-row {
-  grid-template-columns: 90px minmax(0, 1fr) 100px 190px 120px;
+  grid-template-columns: 32px 90px minmax(0, 1fr) 100px 190px 120px;
 }
 
 .account-table-row {
@@ -435,6 +791,144 @@ h1 {
   width: 16px;
   height: 16px;
   margin: 0;
+}
+
+.collector-selection-toolbar {
+  display: grid;
+  grid-template-columns: minmax(90px, max-content) minmax(220px, 280px) minmax(260px, 1fr) max-content;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.smart-filter-toolbar {
+  margin-bottom: 18px;
+}
+
+.selection-count {
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.selection-agent-field {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.selection-agent-field > span {
+  color: #475569;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.selection-agent-field select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 34px 0 12px;
+  color: #0f172a;
+  background-color: #fff;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #64748b 50%),
+    linear-gradient(135deg, #64748b 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) 15px,
+    calc(100% - 11px) 15px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  outline: none;
+  appearance: none;
+  font-size: 14px;
+  line-height: 36px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.selection-agent-field select:hover {
+  border-color: #94a3b8;
+}
+
+.selection-agent-field select:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.selection-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.selection-actions .primary {
+  min-width: 96px;
+}
+
+.selection-result-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.selection-result-list {
+  display: grid;
+  gap: 10px;
+}
+
+.selection-result-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 100px;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.selection-result-item:last-child {
+  border-bottom: 0;
+}
+
+.selection-result-main {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.selection-result-main strong,
+.selection-result-main p,
+.selection-result-main small {
+  overflow-wrap: anywhere;
+}
+
+.selection-result-main p {
+  margin: 0;
+  color: #334155;
+  line-height: 1.6;
+}
+
+.selection-result-main small,
+.selection-result-meta small {
+  color: #64748b;
+}
+
+.selection-result-meta {
+  display: grid;
+  justify-items: end;
+  align-content: start;
+  gap: 6px;
+}
+
+.selection-result-meta strong {
+  color: #0f172a;
+  font-size: 22px;
 }
 
 .account-works-panel {
@@ -781,6 +1275,91 @@ h1 {
   border-radius: 6px;
 }
 
+.review-result {
+  display: grid;
+  gap: 14px;
+}
+
+.review-history {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.review-history-row {
+  grid-template-columns: 180px minmax(120px, 1fr) minmax(160px, 1fr) 80px 80px 120px;
+}
+
+.review-section {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.review-section h3,
+.review-section h4,
+.review-section p,
+.review-section ul {
+  margin: 0;
+}
+
+.review-section h3 {
+  font-size: 16px;
+}
+
+.review-section h4 {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.review-section p,
+.review-section li,
+.review-item small {
+  color: #172033;
+  line-height: 1.65;
+}
+
+.review-section ul {
+  display: grid;
+  gap: 6px;
+  padding-left: 18px;
+}
+
+.review-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.review-columns > div {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.review-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px 0;
+  border-top: 1px solid #e2e8f0;
+}
+
+.review-item:first-of-type {
+  border-top: 0;
+}
+
+.review-item strong {
+  font-weight: 600;
+}
+
+.review-item small {
+  color: #64748b;
+}
+
 .screenshot-list {
   display: flex;
   flex-wrap: wrap;
@@ -816,6 +1395,9 @@ h1 {
   }
 
   .collector-toolbar,
+  .collector-selection-toolbar,
+  .review-toolbar,
+  .skills-local-toolbar,
   .collector-item,
   .collector-table-head,
   .collector-table-row,
@@ -826,6 +1408,28 @@ h1 {
   .publish-table-head,
   .publish-table-row {
     grid-template-columns: 1fr;
+  }
+
+  .selection-result-item {
+    grid-template-columns: 1fr;
+  }
+
+  .selection-agent-field {
+    grid-template-columns: 1fr;
+  }
+
+  .selection-actions,
+  .selection-actions .primary {
+    width: 100%;
+  }
+
+  .pagination-bar {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .selection-result-meta {
+    justify-items: start;
   }
 
   .login-card,

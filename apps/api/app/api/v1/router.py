@@ -1,7 +1,7 @@
 """
 实现逻辑：
-1. 注册 MVP 阶段的账号、账号作品、模型测试、采集内容、草稿和发布任务接口。
-2. 每类资源提供创建、列表、删除、作品同步、模型连通测试和发布诊断能力，满足 H5 管理端联调。
+1. 注册 MVP 阶段的账号、账号作品、多模型配置、Agent 配置、Skill 配置、采集内容、草稿和发布任务接口。
+2. 每类资源提供创建、列表、删除、作品同步、Agent 复盘、Skill 注入、指定模型测试和发布诊断能力，满足 H5 管理端联调。
 3. 账号删除采用禁用状态，后续再按模块拆分成独立路由文件。
 """
 
@@ -12,16 +12,27 @@ from app.db.session import get_db
 from app.models.core_models import PublishTaskStatus
 from app.schemas.core import (
     AccountCreate,
+    AgentConfigRead,
+    AgentConfigUpdate,
+    AccountProfileRead,
+    AccountProfileReportRead,
+    AccountProfileRequest,
     AccountRead,
+    AccountReviewRead,
+    AccountReviewReportRead,
+    AccountReviewRequest,
     AccountWorkRead,
     AccountWorkSyncRead,
     CollectorImportRequest,
     CollectorItemRead,
     CollectorPreviewRequest,
     CollectorSourceRead,
+    ContentSelectionRead,
+    ContentSelectionRequest,
     DraftFromRawContentCreate,
     LoginSessionCreate,
     LoginSessionRead,
+    LocalSkillListRead,
     ModelConfigRead,
     ModelConfigUpdate,
     ModelTestRead,
@@ -34,12 +45,19 @@ from app.schemas.core import (
     PublishTaskStatusUpdate,
     RawContentCreate,
     RawContentRead,
+    SkillConfigRead,
+    SkillConfigUpdate,
 )
 from app.services import crud
+from app.services import agent_setting_service
+from app.services import account_profile_service
 from app.services import account_work_service
+from app.services import account_review_service
+from app.services import content_selection_service
 from app.services import login_session_service
 from app.services import model_config_service
 from app.services import publish_service
+from app.services import skill_setting_service
 from packages.collector import service as collector_service
 
 api_router = APIRouter()
@@ -79,26 +97,200 @@ def list_account_works(account_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
-@api_router.get("/models/config", response_model=ModelConfigRead)
-def get_model_config(db: Session = Depends(get_db)):
-    return model_config_service.get_model_config(db)
+@api_router.get("/models/configs", response_model=list[ModelConfigRead])
+def list_model_configs(db: Session = Depends(get_db)):
+    return model_config_service.list_model_configs(db)
 
 
-@api_router.put("/models/config", response_model=ModelConfigRead)
-def update_model_config(payload: ModelConfigUpdate, db: Session = Depends(get_db)):
-    return model_config_service.update_model_config(db, payload)
+@api_router.post("/models/configs", response_model=ModelConfigRead)
+def create_model_config(payload: ModelConfigUpdate, db: Session = Depends(get_db)):
+    return model_config_service.create_model_config(db, payload)
+
+
+@api_router.put("/models/configs/{model_config_id}", response_model=ModelConfigRead)
+def update_model_config(
+    model_config_id: int, payload: ModelConfigUpdate, db: Session = Depends(get_db)
+):
+    try:
+        return model_config_service.update_model_config(db, model_config_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@api_router.delete("/models/configs/{model_config_id}", response_model=dict[str, bool])
+def delete_model_config(model_config_id: int, db: Session = Depends(get_db)):
+    deleted = model_config_service.delete_model_config(db, model_config_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="模型配置不存在")
+    return {"deleted": True}
+
+
+@api_router.post("/models/configs/{model_config_id}/set-default", response_model=ModelConfigRead)
+def set_default_model_config(model_config_id: int, db: Session = Depends(get_db)):
+    try:
+        return model_config_service.set_default_model_config(db, model_config_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @api_router.post("/models/test", response_model=ModelTestRead)
 def test_model(payload: ModelTestRequest, db: Session = Depends(get_db)):
     try:
-        result = model_config_service.test_model(db, payload.prompt)
+        result = model_config_service.test_model(db, payload.prompt, payload.model_config_id)
         return {
             "provider": result["provider"],
             "model": result["model"],
             "content": result["content"],
             "usage": result["usage"],
         }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@api_router.get("/agents/configs", response_model=list[AgentConfigRead])
+def list_agent_configs(db: Session = Depends(get_db)):
+    return agent_setting_service.list_agent_configs(db)
+
+
+@api_router.post("/agents/configs", response_model=AgentConfigRead)
+def create_agent_config(payload: AgentConfigUpdate, db: Session = Depends(get_db)):
+    try:
+        return agent_setting_service.create_agent_config(db, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@api_router.put("/agents/configs/{agent_id}", response_model=AgentConfigRead)
+def update_agent_config(agent_id: int, payload: AgentConfigUpdate, db: Session = Depends(get_db)):
+    try:
+        return agent_setting_service.update_agent_config(db, agent_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@api_router.delete("/agents/configs/{agent_id}", response_model=dict[str, bool])
+def delete_agent_config(agent_id: int, db: Session = Depends(get_db)):
+    deleted = agent_setting_service.delete_agent_config(db, agent_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Agent 不存在")
+    return {"deleted": True}
+
+
+@api_router.post("/agents/configs/{agent_id}/set-default", response_model=AgentConfigRead)
+def set_default_agent_config(agent_id: int, db: Session = Depends(get_db)):
+    try:
+        return agent_setting_service.set_default_agent_config(db, agent_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@api_router.get("/skills/configs", response_model=list[SkillConfigRead])
+def list_skill_configs(db: Session = Depends(get_db)):
+    return skill_setting_service.list_skill_configs(db)
+
+
+@api_router.get("/skills/local", response_model=LocalSkillListRead)
+def list_local_skills():
+    return skill_setting_service.list_local_skills()
+
+
+@api_router.post("/skills/local/reload", response_model=LocalSkillListRead)
+def reload_local_skills():
+    return skill_setting_service.list_local_skills()
+
+
+@api_router.post("/skills/configs", response_model=SkillConfigRead)
+def create_skill_config(payload: SkillConfigUpdate, db: Session = Depends(get_db)):
+    try:
+        return skill_setting_service.create_skill_config(db, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@api_router.put("/skills/configs/{skill_id}", response_model=SkillConfigRead)
+def update_skill_config(skill_id: int, payload: SkillConfigUpdate, db: Session = Depends(get_db)):
+    try:
+        return skill_setting_service.update_skill_config(db, skill_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@api_router.delete("/skills/configs/{skill_id}", response_model=dict[str, bool])
+def delete_skill_config(skill_id: int, db: Session = Depends(get_db)):
+    deleted = skill_setting_service.delete_skill_config(db, skill_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Skill 不存在")
+    return {"deleted": True}
+
+
+@api_router.post("/agents/account-review", response_model=AccountReviewRead)
+def generate_account_review(payload: AccountReviewRequest, db: Session = Depends(get_db)):
+    try:
+        return account_review_service.generate_account_review(
+            db,
+            account_id=payload.account_id,
+            agent_id=payload.agent_id,
+            model_config_id=payload.model_config_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@api_router.get("/agents/account-review/reports", response_model=list[AccountReviewReportRead])
+def list_account_review_reports(account_id: int | None = None, db: Session = Depends(get_db)):
+    return account_review_service.list_account_review_reports(db, account_id=account_id)
+
+
+@api_router.delete("/agents/account-review/reports/{report_id}", response_model=dict[str, bool])
+def delete_account_review_report(report_id: int, db: Session = Depends(get_db)):
+    deleted = account_review_service.delete_account_review_report(db, report_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="复盘记录不存在")
+    return {"deleted": True}
+
+
+@api_router.post("/agents/account-profile", response_model=AccountProfileRead)
+def generate_account_profile(payload: AccountProfileRequest, db: Session = Depends(get_db)):
+    try:
+        return account_profile_service.generate_account_profile(
+            db,
+            account_id=payload.account_id,
+            review_report_id=payload.review_report_id,
+            agent_id=payload.agent_id,
+            model_config_id=payload.model_config_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@api_router.get("/agents/account-profile/reports", response_model=list[AccountProfileReportRead])
+def list_account_profiles(account_id: int | None = None, db: Session = Depends(get_db)):
+    return account_profile_service.list_account_profiles(db, account_id=account_id)
+
+
+@api_router.delete("/agents/account-profile/reports/{profile_id}", response_model=dict[str, bool])
+def delete_account_profile(profile_id: int, db: Session = Depends(get_db)):
+    deleted = account_profile_service.delete_account_profile(db, profile_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="账号肖像记录不存在")
+    return {"deleted": True}
+
+
+@api_router.post("/agents/content-selection", response_model=ContentSelectionRead)
+def select_collected_content(payload: ContentSelectionRequest, db: Session = Depends(get_db)):
+    try:
+        return content_selection_service.select_collected_content(
+            db,
+            raw_content_ids=payload.raw_content_ids,
+            agent_id=payload.agent_id,
+            model_config_id=payload.model_config_id,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
