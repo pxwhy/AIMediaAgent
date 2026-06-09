@@ -176,14 +176,23 @@ export type ContentSelectionItem = {
 }
 
 export type ContentSelectionResult = {
+  id: number | null
+  account_id: number | null
+  profile_report_id: number | null
+  review_report_id: number | null
   agent_id: number | null
   agent_name: string
   model_config_id: number | null
   provider: string
   model: string
+  basis: string
+  targets: string
+  candidates_count: number
+  recommended_count: number
   results: ContentSelectionItem[]
   raw_report: string
   usage: Record<string, unknown>
+  created_at: string | null
 }
 
 export type ProfileSourcePreference = {
@@ -463,9 +472,30 @@ export async function selectCollectedContent(payload: {
   raw_content_ids: number[]
   agent_id?: number | null
   model_config_id?: number | null
+  account_id?: number | null
+  profile_report_id?: number | null
+  review_report_id?: number | null
+  basis?: string
+  targets?: string
 }): Promise<ContentSelectionResult> {
   const response = await api.post('/agents/content-selection', payload, { timeout: 180000 })
   return response.data
+}
+
+export async function loadContentSelections(accountId?: number | null): Promise<ContentSelectionResult[]> {
+  const response = await api.get('/agents/content-selections', {
+    params: accountId ? { account_id: accountId } : undefined
+  })
+  return response.data
+}
+
+export async function loadContentSelection(selectionId: number): Promise<ContentSelectionResult> {
+  const response = await api.get(`/agents/content-selections/${selectionId}`)
+  return response.data
+}
+
+export async function deleteContentSelection(selectionId: number): Promise<void> {
+  await api.delete(`/agents/content-selections/${selectionId}`)
 }
 
 export async function generateAccountProfile(payload: {

@@ -343,6 +343,11 @@ class ContentSelectionRequest(BaseModel):
     raw_content_ids: list[int]
     agent_id: int | None = None
     model_config_id: int | None = None
+    account_id: int | None = None
+    profile_report_id: int | None = None
+    review_report_id: int | None = None
+    basis: str = ""
+    targets: str = ""
 
 
 class ContentSelectionItemRead(BaseModel):
@@ -357,14 +362,23 @@ class ContentSelectionItemRead(BaseModel):
 
 
 class ContentSelectionRead(BaseModel):
+    id: int | None = None
+    account_id: int | None = None
+    profile_report_id: int | None = None
+    review_report_id: int | None = None
     agent_id: int | None = None
     agent_name: str = ""
     model_config_id: int | None = None
     provider: str
     model: str
+    basis: str = ""
+    targets: str = ""
+    candidates_count: int = 0
+    recommended_count: int = 0
     results: list[ContentSelectionItemRead]
     raw_report: str = ""
     usage: dict[str, Any] = {}
+    created_at: datetime | None = None
 
 
 class ProfileSourcePreference(BaseModel):

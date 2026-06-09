@@ -96,6 +96,19 @@ export async function selectCollectedContent(payload) {
     const response = await api.post('/agents/content-selection', payload, { timeout: 180000 });
     return response.data;
 }
+export async function loadContentSelections(accountId) {
+    const response = await api.get('/agents/content-selections', {
+        params: accountId ? { account_id: accountId } : undefined
+    });
+    return response.data;
+}
+export async function loadContentSelection(selectionId) {
+    const response = await api.get(`/agents/content-selections/${selectionId}`);
+    return response.data;
+}
+export async function deleteContentSelection(selectionId) {
+    await api.delete(`/agents/content-selections/${selectionId}`);
+}
 export async function generateAccountProfile(payload) {
     const response = await api.post('/agents/account-profile', payload, { timeout: 180000 });
     return response.data;

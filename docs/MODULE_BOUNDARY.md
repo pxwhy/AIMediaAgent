@@ -1,88 +1,102 @@
 # 模块边界
 
-## 业务主线
+## 主业务链路
 
 ```text
-Account -> RawContent -> PublishDraft -> PublishTask -> PublishResult -> WorkMetric
+LoginSession -> Account -> AccountWork
+RawContent -> ContentSelectionRun -> ContentSelectionItem
+RawContent -> PublishDraft -> PublishTask -> PublishResult
+AccountWork / PublishResult -> AccountReviewReport -> AccountProfileReport
 ```
+
+## Account
+
+职责：
+
+- 管理平台账号、登录态关联、账号级限制。
+
+不负责：
+
+- 不负责模型推理。
+- 不负责发布页面操作。
 
 ## Collector
 
-只负责采集，不生成、不发布。
+职责：
 
-输入：
+- 拉取来源、分类、热点预览和详情内容。
+- 把可用内容转成 `RawContent`。
 
-```text
-source, category, url
-```
+不负责：
 
-输出：
+- 不决定是否发布。
+- 不负责生成文案。
 
-```text
-RawContent
-```
+## Content Selection
+
+职责：
+
+- 基于素材、复盘、账号肖像和挑选 Agent，给出“选/不选”的判断。
+
+不负责：
+
+- 不直接导入平台。
+- 不直接创建发布动作。
 
 ## Agent
 
-只负责判断、生成和复盘建议，不碰浏览器、不碰 Cookie。
+职责：
 
-输入：
+- 生成复盘、肖像、筛选建议等结构化结果。
+- 组合模型配置、系统提示词、用户提示词、Skills。
 
-```text
-RawContent, AccountProfile
-```
+不负责：
 
-输出：
+- 不读取 Cookie。
+- 不操作浏览器。
+- 不直接发布。
 
-```text
-PublishDraft, ReviewResult, SchedulePlan
-```
+## Skills
+
+职责：
+
+- 提供可复用的 prompt 片段、输出约束、局部规则。
+
+不负责：
+
+- 不直接访问账号登录态。
+- 不直接驱动发布器。
+- 不直接改数据库数据。
 
 ## Draft
 
-负责人机协作和审核。
+职责：
 
-输入：
+- 承接素材到发布任务之间的人机协作编辑。
 
-```text
-PublishDraft
-```
+不负责：
 
-输出：
-
-```text
-Approved PublishDraft
-```
+- 不处理平台页面交互。
 
 ## Publisher
 
-只消费发布任务，负责平台执行和结果回写。
+职责：
 
-输入：
+- 只消费 `PublishTask`。
+- 打开平台编辑页、执行自动发布、记录结果和诊断。
 
-```text
-PublishTask
-```
+不负责：
 
-输出：
-
-```text
-PublishResult
-```
+- 不做选题判断。
+- 不调用模型生成内容。
 
 ## Analytics
 
-只做数据复盘，不修改发布任务。
+职责：
 
-输入：
+- 基于账号作品和发布结果做复盘和账号肖像。
 
-```text
-PublishResult, WorkMetric
-```
+不负责：
 
-输出：
-
-```text
-AccountReport, TopicInsight
-```
-
+- 不直接修改发布任务状态。
+- 不直接执行采集器。

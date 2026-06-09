@@ -290,11 +290,37 @@ def select_collected_content(payload: ContentSelectionRequest, db: Session = Dep
             raw_content_ids=payload.raw_content_ids,
             agent_id=payload.agent_id,
             model_config_id=payload.model_config_id,
+            account_id=payload.account_id,
+            profile_report_id=payload.profile_report_id,
+            review_report_id=payload.review_report_id,
+            basis=payload.basis,
+            targets=payload.targets,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@api_router.get("/agents/content-selections", response_model=list[ContentSelectionRead])
+def list_content_selections(account_id: int | None = None, db: Session = Depends(get_db)):
+    return content_selection_service.list_selection_runs(db, account_id=account_id)
+
+
+@api_router.get("/agents/content-selections/{run_id}", response_model=ContentSelectionRead)
+def get_content_selection(run_id: int, db: Session = Depends(get_db)):
+    result = content_selection_service.get_selection_run(db, run_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="智能筛选记录不存在")
+    return result
+
+
+@api_router.delete("/agents/content-selections/{run_id}", response_model=dict[str, bool])
+def delete_content_selection(run_id: int, db: Session = Depends(get_db)):
+    deleted = content_selection_service.delete_selection_run(db, run_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="智能筛选记录不存在")
+    return {"deleted": True}
 
 
 @api_router.post("/raw-contents", response_model=RawContentRead)

@@ -155,6 +155,50 @@ class AccountProfileReport(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ContentSelectionRun(Base):
+    __tablename__ = "content_selection_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True, index=True)
+    profile_report_id: Mapped[int | None] = mapped_column(ForeignKey("account_profile_reports.id"), nullable=True)
+    review_report_id: Mapped[int | None] = mapped_column(ForeignKey("account_review_reports.id"), nullable=True)
+    agent_id: Mapped[int | None] = mapped_column(ForeignKey("agent_settings.id"), nullable=True)
+    model_config_id: Mapped[int | None] = mapped_column(ForeignKey("model_settings.id"), nullable=True)
+    agent_name: Mapped[str] = mapped_column(String(100), default="")
+    provider: Mapped[str] = mapped_column(String(50), default="")
+    model: Mapped[str] = mapped_column(String(100), default="")
+    basis: Mapped[str] = mapped_column(String(50), default="")
+    targets: Mapped[str] = mapped_column(Text, default="")
+    candidates_count: Mapped[int] = mapped_column(Integer, default=0)
+    recommended_count: Mapped[int] = mapped_column(Integer, default=0)
+    raw_report: Mapped[str] = mapped_column(Text, default="")
+    usage: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    items: Mapped[list["ContentSelectionItem"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
+
+
+class ContentSelectionItem(Base):
+    __tablename__ = "content_selection_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("content_selection_runs.id"), index=True)
+    raw_content_id: Mapped[int] = mapped_column(ForeignKey("raw_contents.id"), index=True)
+    selected: Mapped[int] = mapped_column(Integer, default=0)
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    risk: Mapped[str] = mapped_column(String(20), default="medium")
+    suggested_angle: Mapped[str] = mapped_column(Text, default="")
+    suggested_title: Mapped[str] = mapped_column(String(255), default="")
+    data_limits: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    run: Mapped[ContentSelectionRun] = relationship(back_populates="items")
+    raw_content: Mapped["RawContent"] = relationship()
+
+
 class Account(Base):
     __tablename__ = "accounts"
 
