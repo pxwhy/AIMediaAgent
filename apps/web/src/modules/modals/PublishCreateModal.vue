@@ -67,7 +67,7 @@
 import { inject, type Ref } from 'vue'
 import { appContextKey } from '../appContext'
 
-const app = inject<any>(appContextKey)
+const app = inject(appContextKey)
 if (!app) {
   throw new Error('PublishCreateModal 缺少 appContext')
 }

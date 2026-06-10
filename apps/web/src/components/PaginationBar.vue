@@ -1,12 +1,12 @@
 <!--
 实现逻辑：
 1. 提供工作台各类表格和列表统一复用的分页条组件。
-2. 负责展示总数、每页数量、当前页码，并通过 v-model 形式向父级同步分页状态。
+2. 只展示每页数量、当前页码和翻页操作，不在表格底部展示说明性总数。
+3. 通过 v-model 形式向父级同步分页状态。
 -->
 
 <template>
   <div class="pagination-bar">
-    <span>共 {{ total }} 条</span>
     <label>
       <span>每页</span>
       <select :value="pageSize" @change="handlePageSizeChange">

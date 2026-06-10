@@ -203,8 +203,8 @@ export function createAgentsContext(deps: AgentsDependencies) {
     }
   }
 
-  async function removeAgent(config: AgentConfig) {
-    if (!window.confirm(`确认删除 Agent「${config.name}」吗？`)) {
+  async function removeAgent(config: AgentConfig, options: { skipConfirm?: boolean } = {}) {
+    if (!options.skipConfirm && !window.confirm(`确认删除 Agent「${config.name}」吗？`)) {
       return
     }
     agentBusy.value = true

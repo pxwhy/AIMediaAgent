@@ -9,9 +9,9 @@
     <div class="panel-title compact-title">
       <h2>模型列表</h2>
     </div>
-    <div class="model-toolbar">
+    <TableToolbar>
       <button class="primary" @click="openCreateModelModal" :disabled="modelBusy">新增模型</button>
-    </div>
+    </TableToolbar>
 
     <div v-if="modelConfigs.length === 0" class="empty">
       暂无模型配置
@@ -32,10 +32,14 @@
           <td>{{ config.name }}</td>
           <td>{{ modelProviderLabel(config.provider) }}</td>
           <td>{{ config.model || '-' }}</td>
-          <td>{{ config.api_key_configured ? '已配置' : '未配置' }}</td>
           <td>
-            <span v-if="config.is_default" class="status-badge status-published">默认</span>
-            <template v-else>-</template>
+            <StatusBadge
+              :label="config.api_key_configured ? '已配置' : '未配置'"
+              :tone="config.api_key_configured ? 'success' : 'neutral'"
+            />
+          </td>
+          <td>
+            <StatusBadge :label="config.is_default ? '默认' : ''" tone="success" />
           </td>
           <td>
             <span class="row-actions model-row-actions">
@@ -43,7 +47,7 @@
               <button class="text-button" @click="setDefaultModel(config.id)" :disabled="modelBusy || config.is_default">
                 设默认
               </button>
-              <button class="text-button danger" @click="removeModel(config)" :disabled="modelBusy">删除</button>
+              <button class="text-button danger" @click="openRemoveConfirm(config)" :disabled="modelBusy">删除</button>
             </span>
           </td>
         </tr>
@@ -58,23 +62,38 @@
 
     <ModelAdd v-if="modelModalOpen && !modelForm.id" />
     <ModelEdit v-if="modelModalOpen && modelForm.id" />
+    <ConfirmModal
+      :open="Boolean(removingModel)"
+      title="删除模型"
+      :message="removeConfirmMessage"
+      confirm-text="删除"
+      busy-text="删除中"
+      danger
+      :busy="modelBusy"
+      @cancel="closeRemoveConfirm"
+      @confirm="confirmRemoveModel"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { inject, type Ref } from 'vue'
+import { computed, inject, ref, type Ref } from 'vue'
+import type { ModelConfig } from '../../api/client'
+import ConfirmModal from '../../components/ConfirmModal.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
+import StatusBadge from '../../components/StatusBadge.vue'
+import TableToolbar from '../../components/TableToolbar.vue'
 import { appContextKey } from '../appContext'
 import ModelAdd from './add.vue'
 import ModelEdit from './edit.vue'
 
-const app = inject<any>(appContextKey)
+const app = inject(appContextKey)
 if (!app) {
   throw new Error('ModelsIndex 缺少 appContext')
 }
 
 const modelBusy = app.modelBusy as Ref<boolean>
-const modelConfigs = app.modelConfigs as Ref<any[]>
+const modelConfigs = app.modelConfigs as Ref<ModelConfig[]>
 const modelModalOpen = app.modelModalOpen as Ref<boolean>
 const modelForm = app.modelForm
 const pagination = app.pagination
@@ -85,4 +104,24 @@ const openEditModelModal = app.openEditModelModal
 const setDefaultModel = app.setDefaultModel
 const removeModel = app.removeModel
 const modelProviderLabel = app.modelProviderLabel
+const removingModel = ref<ModelConfig | null>(null)
+const removeConfirmMessage = computed(() =>
+  removingModel.value ? `确认删除模型「${removingModel.value.name}」吗？` : ''
+)
+
+function openRemoveConfirm(config: ModelConfig) {
+  removingModel.value = config
+}
+
+function closeRemoveConfirm() {
+  removingModel.value = null
+}
+
+async function confirmRemoveModel() {
+  if (!removingModel.value) {
+    return
+  }
+  await removeModel(removingModel.value, { skipConfirm: true })
+  closeRemoveConfirm()
+}
 </script>

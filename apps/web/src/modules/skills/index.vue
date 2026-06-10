@@ -95,7 +95,7 @@ import PaginationBar from '../../components/PaginationBar.vue'
 import { appContextKey } from '../appContext'
 import SkillEdit from './edit.vue'
 
-const app = inject<any>(appContextKey)
+const app = inject(appContextKey)
 if (!app) {
   throw new Error('SkillsIndex 缺少 appContext')
 }

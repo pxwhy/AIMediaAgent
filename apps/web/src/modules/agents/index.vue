@@ -9,9 +9,9 @@
     <div class="panel-title compact-title">
       <h2>Agent 列表</h2>
     </div>
-    <div class="model-toolbar">
+    <TableToolbar>
       <button class="primary" @click="openCreateAgentModal" :disabled="agentBusy">新增 Agent</button>
-    </div>
+    </TableToolbar>
 
     <div v-if="agentConfigs.length === 0" class="empty">
       暂无 Agent 配置
@@ -34,10 +34,14 @@
           <td>{{ agentTypeLabel(config.agent_type) }}</td>
           <td>{{ config.model_config_name }}</td>
           <td>{{ config.skill_names.length ? config.skill_names.join('、') : '-' }}</td>
-          <td>{{ config.enabled ? '启用' : '禁用' }}</td>
           <td>
-            <span v-if="config.is_default" class="status-badge status-published">默认</span>
-            <template v-else>-</template>
+            <StatusBadge
+              :label="config.enabled ? '启用' : '禁用'"
+              :tone="config.enabled ? 'success' : 'neutral'"
+            />
+          </td>
+          <td>
+            <StatusBadge :label="config.is_default ? '默认' : ''" tone="success" />
           </td>
           <td>
             <span class="row-actions model-row-actions">
@@ -45,7 +49,7 @@
               <button class="text-button" @click="setDefaultAgent(config.id)" :disabled="agentBusy || config.is_default">
                 设默认
               </button>
-              <button class="text-button danger" @click="removeAgent(config)" :disabled="agentBusy">删除</button>
+              <button class="text-button danger" @click="openRemoveConfirm(config)" :disabled="agentBusy">删除</button>
             </span>
           </td>
         </tr>
@@ -60,23 +64,38 @@
 
     <AgentAdd v-if="agentModalOpen && !agentForm.id" />
     <AgentEdit v-if="agentModalOpen && agentForm.id" />
+    <ConfirmModal
+      :open="Boolean(removingAgent)"
+      title="删除 Agent"
+      :message="removeConfirmMessage"
+      confirm-text="删除"
+      busy-text="删除中"
+      danger
+      :busy="agentBusy"
+      @cancel="closeRemoveConfirm"
+      @confirm="confirmRemoveAgent"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { inject, type Ref } from 'vue'
+import { computed, inject, ref, type Ref } from 'vue'
+import type { AgentConfig } from '../../api/client'
+import ConfirmModal from '../../components/ConfirmModal.vue'
 import PaginationBar from '../../components/PaginationBar.vue'
+import StatusBadge from '../../components/StatusBadge.vue'
+import TableToolbar from '../../components/TableToolbar.vue'
 import { appContextKey } from '../appContext'
 import AgentAdd from './add.vue'
 import AgentEdit from './edit.vue'
 
-const app = inject<any>(appContextKey)
+const app = inject(appContextKey)
 if (!app) {
   throw new Error('AgentsIndex 缺少 appContext')
 }
 
 const agentBusy = app.agentBusy as Ref<boolean>
-const agentConfigs = app.agentConfigs as Ref<any[]>
+const agentConfigs = app.agentConfigs as Ref<AgentConfig[]>
 const agentModalOpen = app.agentModalOpen as Ref<boolean>
 const agentForm = app.agentForm
 const pagination = app.pagination
@@ -87,4 +106,24 @@ const openEditAgentModal = app.openEditAgentModal
 const setDefaultAgent = app.setDefaultAgent
 const removeAgent = app.removeAgent
 const agentTypeLabel = app.agentTypeLabel
+const removingAgent = ref<AgentConfig | null>(null)
+const removeConfirmMessage = computed(() =>
+  removingAgent.value ? `确认删除 Agent「${removingAgent.value.name}」吗？` : ''
+)
+
+function openRemoveConfirm(config: AgentConfig) {
+  removingAgent.value = config
+}
+
+function closeRemoveConfirm() {
+  removingAgent.value = null
+}
+
+async function confirmRemoveAgent() {
+  if (!removingAgent.value) {
+    return
+  }
+  await removeAgent(removingAgent.value, { skipConfirm: true })
+  closeRemoveConfirm()
+}
 </script>

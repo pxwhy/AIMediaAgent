@@ -7,6 +7,7 @@
 
 import { computed, onMounted, reactive, ref } from 'vue'
 import { loadDashboard } from '../../api/client'
+import type { AppContext } from '../appContext'
 import { createAccountProfileContext } from '../account-profile/context'
 import { createAccountsContext } from '../accounts/context'
 import { createAgentsContext } from '../agents/context'
@@ -176,7 +177,7 @@ export function createWorkbench() {
     formatDate,
     priorityLabel,
     platformLabel
-  }
+  } satisfies AppContext
 
   return {
     activePage,

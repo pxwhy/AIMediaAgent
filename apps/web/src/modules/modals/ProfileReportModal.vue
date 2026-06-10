@@ -113,7 +113,7 @@
 import { inject } from 'vue'
 import { appContextKey } from '../appContext'
 
-const app = inject<any>(appContextKey)
+const app = inject(appContextKey)
 if (!app) {
   throw new Error('ProfileReportModal 缺少 appContext')
 }

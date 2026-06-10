@@ -85,7 +85,7 @@ import { inject, type Ref } from 'vue'
 import PaginationBar from '../../components/PaginationBar.vue'
 import { appContextKey } from '../appContext'
 
-const app = inject<any>(appContextKey)
+const app = inject(appContextKey)
 if (!app) {
   throw new Error('AnalyticsPage 缺少 appContext')
 }

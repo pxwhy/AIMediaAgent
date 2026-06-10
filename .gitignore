@@ -9,3 +9,4 @@ dist/
 .pids/
 logs/
 data/
+apps/web/src/**/*.js

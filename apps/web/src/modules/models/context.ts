@@ -152,8 +152,8 @@ export function createModelsContext(deps: ModelsDependencies) {
     }
   }
 
-  async function removeModel(config: ModelConfig) {
-    if (!window.confirm(`确认删除模型「${config.name}」吗？`)) {
+  async function removeModel(config: ModelConfig, options: { skipConfirm?: boolean } = {}) {
+    if (!options.skipConfirm && !window.confirm(`确认删除模型「${config.name}」吗？`)) {
       return
     }
     modelBusy.value = true
